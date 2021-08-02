@@ -15,7 +15,7 @@ def lenient_argmax(*args: Iterable[torch.Tensor]) -> None:
     return result
 
 
-class Metric(ABC):
+class Metric:
 
     def __init__(self, transform: Callable, device: str) -> None:
         self.transform = transform or identity

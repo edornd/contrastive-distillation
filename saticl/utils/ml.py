@@ -17,18 +17,18 @@ from saticl.datasets.transforms import Denormalize
 from saticl.utils import common as utils
 from torchsummary import summary
 
-EPS = np.finfo(np.float32).eps
+F32_EPS = np.finfo(np.float32).eps
+F16_EPS = np.finfo(np.float16).eps
 
 
 def identity(*args: Any) -> Any:
     return args
 
 
-def seed_everything(seed: int, strict: bool = False) -> None:
+def seed_everything(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.use_deterministic_algorithms(strict)
 
 
 def seed_worker(worker_id: int):
@@ -37,10 +37,7 @@ def seed_worker(worker_id: int):
     random.seed(worker_seed)
 
 
-def string_summary(model: torch.nn.Module,
-                   input_size: Tuple[int, int, int],
-                   batch_size: int = -1,
-                   device: str = "cpu"):
+def string_summary(model: torch.nn.Module, input_size: Tuple[int, int, int], batch_size: int = -1, device: str = "cpu"):
     output: str = None
     with io.StringIO() as buf, redirect_stdout(buf):
         summary(model, input_size=input_size, batch_size=batch_size, device=device)

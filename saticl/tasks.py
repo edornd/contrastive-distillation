@@ -134,6 +134,8 @@ class Task:
         Returns:
             int: [description]
         """
+        if self.step == 0:
+            return 0
         return sum([len(self.task_dict[s]) for s in range(self.step)]) + self.shift
 
     def current_class_count(self) -> int:

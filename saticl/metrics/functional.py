@@ -1,7 +1,8 @@
 from typing import Optional, Tuple, Union
 
 import torch
-from saticl.utils.ml import EPS
+
+from saticl.utils.ml import F32_EPS
 
 
 def valid_samples(ignore_index: int,
@@ -124,7 +125,7 @@ def iou_score(tp: torch.Tensor, fp: torch.Tensor, fn: torch.Tensor, reduce: bool
     :return: tensor representing the intersection over union for each class (C,), or a mean ()
     :rtype: torch.Tensor
     """
-    score = tp / (tp + fp + fn + EPS)
+    score = tp / (tp + fp + fn + F32_EPS)
     return score.mean() if reduce else score
 
 
@@ -139,7 +140,7 @@ def precision_score(tp: torch.Tensor, fp: torch.Tensor, reduce: bool = True) -> 
     :return: tensor representing the class precision (C,) or a mean precision ()
     :rtype: torch.Tensor
     """
-    score = tp / (tp + fp + EPS)
+    score = tp / (tp + fp + F32_EPS)
     return score.mean() if reduce else score
 
 
@@ -154,7 +155,7 @@ def recall_score(tp: torch.Tensor, fn: torch.Tensor, reduce: bool = True) -> tor
     :return: recall score
     :rtype: torch.Tensor
     """
-    score = tp / (tp + fn + EPS)
+    score = tp / (tp + fn + F32_EPS)
     return score.mean() if reduce else score
 
 
@@ -175,5 +176,5 @@ def f1_score(tp: torch.Tensor, fp: torch.Tensor, fn: torch.Tensor, reduce: bool 
     # since it also collapses the precision and recall.
     precision = precision_score(tp=tp, fp=fp, reduce=False)
     recall = recall_score(tp=tp, fn=fn, reduce=False)
-    f1 = 2 * (precision * recall) / (precision + recall + EPS)
+    f1 = 2 * (precision * recall) / (precision + recall + F32_EPS)
     return f1.mean() if reduce else f1

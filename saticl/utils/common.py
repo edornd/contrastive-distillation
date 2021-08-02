@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 import yaml
 from pydantic import BaseSettings
 from saticl.logging.console import DistributedLogger
+from saticl.utils.decorators import only_rank
 from tqdm import tqdm
 
 
@@ -23,6 +24,7 @@ def generate_id() -> str:
     return str(uuid4())
 
 
+@only_rank(0)
 def makedirs(path: str) -> None:
     return os.makedirs(path)
 
@@ -32,7 +34,7 @@ def prepare_folder(root_folder: Path, experiment_id: str = ""):
         root_folder = Path(root_folder)
     full_path = root_folder / experiment_id
     if not full_path.exists():
-        os.makedirs(str(full_path))
+        makedirs(str(full_path))
     return full_path
 
 

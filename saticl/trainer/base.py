@@ -49,9 +49,11 @@ class Trainer:
                  kde_criterion: nn.Module = None,
                  kdd_lambda: float = 0.0,
                  kde_lambda: float = 0.0,
-                 logger: BaseLogger = None) -> None:
+                 logger: BaseLogger = None,
+                 debug: bool = False) -> None:
         assert task.step == 0 or old_model is not None, "ICL steps require the old model for KD"
         self.accelerator = accelerator
+        self.debug = debug
         self.model = new_model
         self.old_model = old_model
         self.criterion = seg_criterion
@@ -127,6 +129,11 @@ class Trainer:
             header = list(self.new_classes.values())
             self.logger.log_results(f"{stage.value}/results", headers=header, results=classwise)
 
+    def _debug_training(self, **kwargs: dict) -> None:
+        LOG.debug("[Epoch %2d] - iteration: %d", self.current_epoch, self.global_step)
+        for name, item in kwargs.items():
+            LOG.debug("%8s: %s", name, str(item))
+
     def add_callback(self, callback: BaseCallback) -> Trainer:
         self.callbacks.append(callback)
         return self
@@ -163,6 +170,9 @@ class Trainer:
         y_true = self.accelerator.gather(y)
         y_pred = self.accelerator.gather(new_out)
         self._update_metrics(y_true=y_true, y_pred=y_pred, stage=TrainerStage.train)
+        # debug if active
+        if self.debug:
+            self._debug_training(x=x.dtype, y=y.dtype, pred=new_out.dtype, seg_loss=seg_loss, kdd_loss=kdd_loss)
         return total_loss, seg_loss, kdd_loss
 
     def train_epoch_end(self, train_losses: list, train_times: list):
@@ -256,9 +266,6 @@ class Trainer:
                 loss, sg_loss, kd_loss = self.validation_batch(batch=batch)
                 elapsed = (time.time() - start)
                 # gather info
-                sg_loss = self.accelerator.gather(sg_loss)
-                kd_loss = self.accelerator.gather(kd_loss)
-                loss = self.accelerator.gather(loss)
                 loss_val = loss.mean().item()
                 val_tqdm.set_postfix({"loss": loss_val})
                 # we do not log 'iter' versions for loss and timings, since we do notadvance the logger step

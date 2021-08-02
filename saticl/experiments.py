@@ -80,10 +80,10 @@ def prepare_metrics(num_classes: int, device: torch.device) -> Tuple[dict, dict]
     # prepare metrics
     t_metrics = (Metrics.f1, Metrics.iou)
     v_metrics = (m for m in Metrics)
-    train_metrics = {e.name: e.value(num_classes=num_classes).to(device) for e in t_metrics}
-    valid_metrics = {e.name: e.value(num_classes=num_classes).to(device) for e in v_metrics}
-    valid_metrics.update(dict(class_iou=IoU(num_classes=num_classes, reduction=None).to(device),
-                              class_f1=F1Score(num_classes=num_classes, reduction=None).to(device)))
+    train_metrics = {e.name: e.value(num_classes=num_classes, device=device) for e in t_metrics}
+    valid_metrics = {e.name: e.value(num_classes=num_classes, device=device) for e in v_metrics}
+    valid_metrics.update(dict(class_iou=IoU(num_classes=num_classes, reduction=None, device=device),
+                              class_f1=F1Score(num_classes=num_classes, reduction=None, device=device)))
     LOG.debug("Train metrics: %s", str(list(train_metrics.keys())))
     LOG.debug("Eval. metrics: %s", str(list(valid_metrics.keys())))
     return train_metrics, valid_metrics
@@ -115,6 +115,10 @@ def init_from_previous_step(config: Configuration, new_model: ICLSegmenter, old_
 def train(config: Configuration):
     # assertions before starting
     assert config.task.step == 0 or config.name is not None, "Specify the experiment name with ICL steps!"
+    assert torch.backends.cudnn.enabled, "AMP requires CUDNN backend to be enabled."
+    # prepare accelerator ASAP
+    accelerator = Accelerator(fp16=config.trainer.amp)
+
     # Create the directory tree:
     # outputs
     # |-- dataset
@@ -132,10 +136,9 @@ def train(config: Configuration):
     LOG.info("Logs folder:   %s", logs_folder)
     LOG.info("Configuration: %s", config_path)
 
-    # prepare accelerator and seed everything
-    accelerator = Accelerator()
+    # seeding everything
+    LOG.info("Using seed: %d", config.seed)
     seed_everything(config.seed)
-
     # prepare datasets
     LOG.info("Loading datasets...")
     train_set, valid_set = prepare_dataset(config=config)
@@ -163,9 +166,11 @@ def train(config: Configuration):
     # prepare models
     LOG.info("Preparing model...")
     new_model = prepare_model(config=config, task=task)
+    new_model = new_model.to(accelerator.device)
     if task.step > 0:
         old_task = Task(dataset=config.dataset, name=config.task.name, step=task.step - 1)
         old_model = prepare_model(config=config, task=old_task)
+        old_model = old_model.to(accelerator.device)
     else:
         old_model = None
     new_model, old_model = init_from_previous_step(config, new_model, old_model, model_folder, task)
@@ -206,7 +211,8 @@ def train(config: Configuration):
                       kde_criterion=None,
                       kdd_lambda=config.kd.decoder_factor,
                       kde_lambda=config.kd.encoder_factor,
-                      logger=logger)
+                      logger=logger,
+                      debug=config.debug)
     trainer.add_callback(EarlyStopping(call_every=1, metric=monitored,
                                        criterion=EarlyStoppingCriterion.maximum,
                                        patience=config.trainer.patience)) \
