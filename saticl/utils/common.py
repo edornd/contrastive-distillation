@@ -23,6 +23,10 @@ def generate_id() -> str:
     return str(uuid4())
 
 
+def makedirs(path: str) -> None:
+    return os.makedirs(path)
+
+
 def prepare_folder(root_folder: Path, experiment_id: str = ""):
     if isinstance(root_folder, str):
         root_folder = Path(root_folder)

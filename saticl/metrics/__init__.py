@@ -1,4 +1,5 @@
-from typing import Any, Callable, Iterable, Optional, Union
+from abc import ABC, abstractmethod
+from typing import Any, Callable, Iterable, Optional
 
 import torch
 
@@ -14,32 +15,21 @@ def lenient_argmax(*args: Iterable[torch.Tensor]) -> None:
     return result
 
 
-class Metric:
+class Metric(ABC):
 
-    def __init__(self, transform: Callable, device: str = "cpu") -> None:
+    def __init__(self, transform: Callable, device: str) -> None:
         self.transform = transform or identity
         self.device = torch.device(device)
-        self.tensors = set()
-        self.reset()
 
-    def __setattr__(self, name: str, value: Any) -> None:
-        if isinstance(value, torch.Tensor):
-            self.tensors.add(name)
-            value = value.to(self.device)
-        super().__setattr__(name, value)
-
-    def to(self, device: Union[str, torch.device]) -> "Metric":
-        self.device = device
-        for attr in self.tensors:
-            setattr(self, attr, getattr(self, attr))
-        return self
-
+    @abstractmethod
     def update(self, y_true: torch.Tensor, y_pred: torch.Tensor) -> None:
         raise NotImplementedError("Override in subclass")
 
+    @abstractmethod
     def compute(self) -> Any:
         raise NotImplementedError("Override in subclass")
 
+    @abstractmethod
     def reset(self) -> None:
         """ Overridden by subclasses """
         raise NotImplementedError("Override in subclass")
@@ -57,10 +47,12 @@ class ConfusionMatrix(Metric):
     def __init__(self,
                  num_classes: Optional[int] = None,
                  ignore_index: Optional[int] = 255,
-                 transform: Callable = lenient_argmax) -> None:
+                 transform: Callable = lenient_argmax,
+                 device: str = "cpu") -> None:
+        super().__init__(transform=transform, device=device)
         self.num_classes = num_classes
         self.ignore_index = ignore_index
-        super().__init__(transform=transform)
+        self.reset()
 
     def update(self, y_true: torch.Tensor, y_pred: torch.Tensor) -> None:
         """Accumulate data, to be averaged by the compute pass.
@@ -82,7 +74,7 @@ class ConfusionMatrix(Metric):
         return self.confusion_matrix
 
     def reset(self) -> None:
-        self.confusion_matrix = torch.zeros((self.num_classes, self.num_classes))
+        self.confusion_matrix = torch.zeros((self.num_classes, self.num_classes), device=self.device)
 
 
 class GeneralStatistics(Metric):
@@ -95,13 +87,15 @@ class GeneralStatistics(Metric):
                  num_classes: int,
                  ignore_index: Optional[int] = 255,
                  reduction: Optional[str] = "micro",
-                 transform: Callable = lenient_argmax) -> None:
+                 transform: Callable = lenient_argmax,
+                 device: str = "cpu") -> None:
+        super().__init__(transform=transform, device=device)
         self.num_classes = num_classes
         self.ignore_index = ignore_index
         self.reduction = reduction
         self.reduce_first = reduction == "micro"
         self.should_reduce = reduction is not None
-        super().__init__(transform=transform)
+        self.reset()
 
     def update(self, y_true: torch.Tensor, y_pred: torch.Tensor) -> None:
         """Updates the statistics by including the provided predictions and targets.
@@ -141,10 +135,10 @@ class GeneralStatistics(Metric):
 
     def reset(self) -> None:
         shape = () if self.reduce_first else (self.num_classes,)
-        self.tp = torch.zeros(shape, dtype=torch.long)
-        self.fp = torch.zeros(shape, dtype=torch.long)
-        self.tn = torch.zeros(shape, dtype=torch.long)
-        self.fn = torch.zeros(shape, dtype=torch.long)
+        self.tp = torch.zeros(shape, dtype=torch.long, device=self.device)
+        self.fp = torch.zeros(shape, dtype=torch.long, device=self.device)
+        self.tn = torch.zeros(shape, dtype=torch.long, device=self.device)
+        self.fn = torch.zeros(shape, dtype=torch.long, device=self.device)
 
 
 class Precision(GeneralStatistics):
