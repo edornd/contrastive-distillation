@@ -1,0 +1,15 @@
+Run started
+Experiment ID: 2021-08-01-20-34
+Output folder: outputs/potsdam/222a/2021-08-01-20-34
+Models folder: outputs/potsdam/222a/2021-08-01-20-34/models
+Logs folder:   outputs/potsdam/222a/2021-08-01-20-34/logs
+Configuration: outputs/potsdam/222a/2021-08-01-20-34/segmenter-config-s0.yaml
+Loading datasets...
+Full sets - train set: 8627 samples, validation set: 973 samples
+ICL sets  - Train set: 7984 samples, validation set: 898 samples
+Preparing model...
+Loading pretrained weights from url (https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-weights/resnet34-43635321.pth)
+Step 0: training from scratch without old model
+Done preparing models
+[Epoch  0]
+[Epoch  0] Interrupting training
