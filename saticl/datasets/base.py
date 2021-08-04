@@ -30,6 +30,18 @@ class DatasetBase(Dataset, ABC):
         """
         raise NotImplementedError("Implement in a subclass")
 
+    def palette(self) -> Dict[int, tuple]:
+        """Returns a dictionary of <index, color tuple>, representing the color associated with the given
+        category index.
+
+        Raises:
+            NotImplementedError: abstract method to be implemented in a subclass
+
+        Returns:
+            Dict[int, tuple]: dictionary of class indices and associated color tuple
+        """
+        raise NotImplementedError("Implement in a subclass")
+
     @abstractmethod
     def add_mask(self, mask: List[bool], stage: str = None) -> None:
         """Applies a boolean mask to the current dataset, effectively eliminating those items

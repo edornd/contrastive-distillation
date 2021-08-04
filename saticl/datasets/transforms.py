@@ -1,7 +1,8 @@
 from typing import Iterable
 
-import albumentations as alb
 import torch
+
+import albumentations as alb
 from albumentations.pytorch import ToTensorV2
 
 
@@ -14,13 +15,18 @@ class Denormalize:
     def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            tensor (Tensor): Tensor image of size (C, H, W) to be normalized.
+            tensor (Tensor): Tensor image of size (B, C, H, W) to be normalized.
         Returns:
             Tensor: Normalized image.
         """
+        single_image = tensor.ndim == 3
+        tensor = tensor.unsqueeze(0) if single_image else tensor
         for t, m, s in zip(tensor, self.mean, self.std):
-            t.mul_(s).add_(m)
-        return tensor
+            t[:3].mul_(s).add_(m)
+        # swap from [B, C, H, W] to [B, H, W, C]
+        tensor = tensor.permute(0, 2, 3, 1)
+        tensor = tensor[0] if single_image else tensor
+        return tensor.detach().cpu().numpy()
 
 
 def adapt_channels(mean: tuple, std: tuple, in_channels: int = 3):
@@ -57,3 +63,7 @@ def test_transforms(in_channels: int = 3,
                     std: tuple = (0.229, 0.224, 0.225)) -> alb.Compose:
     mean, std = adapt_channels(mean, std, in_channels=in_channels)
     return alb.Compose([alb.Normalize(mean=mean, std=std), ToTensorV2()])
+
+
+def inverse_transform(mean: tuple = (0.485, 0.456, 0.406), std: tuple = (0.229, 0.224, 0.225)):
+    return Denormalize(mean=mean, std=std)

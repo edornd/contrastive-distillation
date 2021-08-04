@@ -45,6 +45,10 @@ def string_summary(model: torch.nn.Module, input_size: Tuple[int, int, int], bat
     return output
 
 
+def checkpoint_path(model_folder: Path, task_name: str, step: int) -> Path:
+    return model_folder / f"task{task_name}_step-{step}.pth"
+
+
 def initialize_weights(module: nn.Module) -> None:
     if isinstance(module, nn.Conv2d):
         torch.nn.init.kaiming_normal_(module.weight)
@@ -123,6 +127,8 @@ def init_experiment(config: BaseSettings, log_name: str = "output.log"):
     # prepare experiment directories
     model_folder = utils.prepare_folder(output_folder / "models")
     logs_folder = utils.prepare_folder(output_folder / "logs")
+    if config.name is not None:
+        assert model_folder.exists() and logs_folder.exists()
     return experiment_id, output_folder, model_folder, logs_folder
 
 
@@ -183,16 +189,37 @@ def mask_to_rgb(mask: np.ndarray, palette: Dict[int, tuple]) -> np.ndarray:
     return lut[mask]
 
 
-def make_grid(input_batch: torch.Tensor, rgb_true: np.ndarray, rgb_pred: np.ndarray) -> np.ndarray:
-    assert input_batch.ndim == 4, "Tensor not in format: [batch, channels, h, w]"
-    assert input_batch.size(0) == 1, "Only one image at a time!"
+def make_grid(inputs: np.ndarray, rgb_true: np.ndarray, rgb_pred: np.ndarray) -> np.ndarray:
+    assert inputs.ndim == 3, "Input must be a single RGB image (channels last)"
+    assert inputs.shape == rgb_true.shape == rgb_pred.shape, \
+        f"Shapes not matching: {inputs.shape}, {rgb_true.shape}, {rgb_pred.shape}"
+    # image = Denormalize()(input_batch[0]).cpu().numpy()[:3].transpose(1, 2, 0)
+    # image = (image * 255).astype(np.uint8)
+    return np.concatenate((inputs, rgb_true, rgb_pred), axis=1).astype(np.uint8)
 
-    image = Denormalize()(input_batch[0]).cpu().numpy()[:3].transpose(1, 2, 0)
-    image = (image * 255).astype(np.uint8)
-    assert image.shape == rgb_true.shape == rgb_pred.shape, \
-        f"Shapes not matching: {image.shape}, {rgb_true.shape}, {rgb_pred.shape}"
 
-    return np.concatenate((image, rgb_true, rgb_pred), axis=1).astype(np.uint8)
+def save_grid(inputs: torch.Tensor,
+              targets: torch.Tensor,
+              preds: torch.Tensor,
+              filepath: Path,
+              filename: str,
+              palette: Dict[int, tuple],
+              offset: int = 0) -> None:
+    assert targets.shape == preds.shape, f"Shapes not matching: {targets.shape}, {preds.shape}"
+    assert inputs.ndim >= 3, "Image must be at least a 3-channel tensor (channels first)"
+    if inputs.ndim == 4:
+        for i in range(inputs.shape[0]):
+            save_grid(inputs[i], targets[i], preds[i], filepath=filepath, filename=filename, palette=palette, offset=i)
+    else:
+        image = (Denormalize()(inputs) * 255).astype(np.uint8)
+        # targets and predictions still have a channel dim
+        if targets.ndim > 2:
+            targets = targets.squeeze(0)
+            preds = preds.squeeze(0)
+        rgb_true = mask_to_rgb(targets.numpy(), palette=palette)
+        rgb_pred = mask_to_rgb(preds.numpy(), palette=palette)
+        grid = make_grid(image, rgb_true, rgb_pred)
+        plt.imsave(filepath / f"{filename}-{offset}.png", grid)
 
 
 def mask_set(dataset_length: int,

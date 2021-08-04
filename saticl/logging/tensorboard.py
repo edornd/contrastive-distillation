@@ -49,7 +49,11 @@ class TensorBoardLogger(BaseLogger):
 
     @only_rank(0)
     def log_image(self, name: str, image: np.ndarray, **kwargs) -> None:
-        self.log.add_image(self.transform_name(name), image, global_step=self.get_step(kwargs), **kwargs)
+        self.log.add_image(self.transform_name(name),
+                           image,
+                           global_step=self.get_step(kwargs),
+                           dataformats="HWC",
+                           **kwargs)
 
     @only_rank(0)
     def log_figure(self, name: str, figure: Figure, **kwargs) -> None:

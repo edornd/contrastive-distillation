@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from typing import Dict, List
 
 import torch
@@ -17,10 +18,13 @@ class ICLDataset(DatasetBase):
         self.dataset = dataset
         self.task = task
         self._categories = dataset.categories().copy()
+        self._palette = dataset.palette().copy()
         # if the dataset doesn't include the background on its own, add it manually
         if not dataset.has_background():
             self._categories = {(k + 1): v for k, v in self._categories.items()}
+            self._palette = {min(k + 1, 255): v for k, v in self._palette.items()}
             self._categories.update({0: "background"})
+            self._palette.update({0: (0, 0, 0)})
         # check the (original, non-shifted) task labels are in the dataset
         assert all([index in dataset.categories() for index in task.seen_labels]), \
             f"Label index out of bounds for dataset {dataset.name()}"
@@ -40,7 +44,10 @@ class ICLDataset(DatasetBase):
         self.label2index[dataset.ignore_index()] = mask_value
         self.index2label = {v: k for k, v in self.label2index.items()}
         # prepare a similar lookup, including all available classes
-        self.label_transform = {k: self.label2index.get(k, mask_value) for k in self._categories}
+        self.label_transform = dict()
+        for key in self._categories:
+            substitute = self.label2index.get(key, mask_value) if key in new_labels else mask_value
+            self.label_transform[key] = substitute
 
     def _process_labels(self, labels: OrderedSet) -> OrderedSet:
         shift = 0 if self.has_background else 1
@@ -58,11 +65,14 @@ class ICLDataset(DatasetBase):
     def categories(self) -> Dict[int, str]:
         return self._categories
 
+    def palette(self) -> Dict[int, tuple]:
+        return {k: self._palette[v] for k, v in self.index2label.items()}
+
     def old_categories(self) -> Dict[int, str]:
-        return {i: self._categories[i] for i in self.old_labels}
+        return OrderedDict((i, self._categories[i]) for i in self.old_labels)
 
     def new_categories(self) -> Dict[int, str]:
-        return {i: self._categories[i] for i in self.new_labels}
+        return OrderedDict((i, self._categories[i]) for i in self.new_labels)
 
     def add_mask(self, mask: List[bool], stage: str = None) -> None:
         return super().add_mask(mask, stage)

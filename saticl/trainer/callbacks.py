@@ -1,10 +1,13 @@
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable, Dict
 
+import numpy as np
 import torch
 
 from saticl.utils.common import get_logger, prepare_folder
+from saticl.utils.ml import make_grid, mask_to_rgb
+
 
 if TYPE_CHECKING:
     from saticl.trainer.base import Trainer
@@ -140,3 +143,36 @@ class Checkpoint(BaseCallback):
 
     def dispose(self, trainer: "Trainer"):
         self.best_epoch = None
+
+
+class DisplaySamples(BaseCallback):
+
+    def __init__(self,
+                 inverse_transform: Callable,
+                 color_palette: Dict[int, tuple],
+                 call_every: int = 1,
+                 stage: str = "val") -> None:
+        super().__init__(call_every=call_every)
+        self.inverse_transform = inverse_transform
+        self.color_palette = color_palette
+        self.stage = stage
+
+    def setup(self, trainer: "Trainer"):
+        if trainer.sample_batches is None or len(trainer.sample_batches) == 0:
+            LOG.warn("An ImagePlotter callback is active, but no samples have been found, have you set them?")
+
+    def call(self, trainer: "Trainer", *args: Any, **kwargs: Any) -> Any:
+        if not trainer.sample_content:
+            LOG.warn("No content to be displayed")
+        for i, (image, y_true, y_pred) in enumerate(trainer.sample_content):
+            image = self.inverse_transform(image)
+            image = (image[:, :, :3] * 255).astype(np.uint8)
+            if y_pred.ndim == 3:
+                y_pred = torch.argmax(y_pred, dim=0)
+            true_masks = mask_to_rgb(y_true.numpy(), palette=self.color_palette)
+            pred_masks = mask_to_rgb(y_pred.numpy(), palette=self.color_palette)
+            grid = make_grid(image, true_masks, pred_masks)
+            trainer.logger.log_image(f"{self.stage}/sample-{i}", image=grid, step=trainer.current_epoch)
+
+    def dispose(self, trainer: "Trainer"):
+        trainer.sample_content.clear()

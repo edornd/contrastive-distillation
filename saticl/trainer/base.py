@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from enum import Enum
 from posix import listdir
-from typing import TYPE_CHECKING, Any, Dict, Iterable
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List
 
 import numpy as np
 import torch
 from accelerate import Accelerator
 from torch import nn
+from torch.cuda.amp import GradScaler, autocast
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
@@ -18,6 +19,7 @@ from saticl.logging.empty import EmptyLogger
 from saticl.metrics import Metric
 from saticl.tasks import Task
 from saticl.utils.common import get_logger, progressbar
+from saticl.utils.decorators import get_rank
 
 if TYPE_CHECKING:
     from saticl.trainer.callbacks import BaseCallback
@@ -40,8 +42,6 @@ class Trainer:
                  old_model: nn.Module,
                  optimizer: Optimizer,
                  scheduler: Any,
-                 train_metrics: Dict[str, Metric],
-                 val_metrics: Dict[str, Metric],
                  old_classes: Dict[int, str],
                  new_classes: Dict[int, str],
                  seg_criterion: nn.Module,
@@ -49,9 +49,13 @@ class Trainer:
                  kde_criterion: nn.Module = None,
                  kdd_lambda: float = 0.0,
                  kde_lambda: float = 0.0,
+                 train_metrics: Dict[str, Metric] = None,
+                 val_metrics: Dict[str, Metric] = None,
                  logger: BaseLogger = None,
+                 samples: List[int] = None,
+                 stage: str = "train",
                  debug: bool = False) -> None:
-        assert task.step == 0 or old_model is not None, "ICL steps require the old model for KD"
+        assert task.step == 0 or old_model is not None or stage == "test", "ICL steps require the old model for KD"
         self.accelerator = accelerator
         self.debug = debug
         self.model = new_model
@@ -62,16 +66,25 @@ class Trainer:
         self.criterion_kde = kde_criterion
         self.kdd_lambda = kdd_lambda
         self.kde_lambda = kde_lambda
-        # optimizer, scheduler, metrics and logger
+        # optimizer, scheduler and logger, scaler for AMP
+        self.scaler = GradScaler()
         self.optimizer = optimizer
         self.scheduler = scheduler
-        self.metrics = {TrainerStage.train.value: train_metrics, TrainerStage.val.value: val_metrics}
         self.logger = logger or EmptyLogger()
+        # setup metrics, if any
+        self.metrics = dict()
+        if train_metrics is not None:
+            self.add_metrics(stage=TrainerStage.train, metrics=train_metrics)
+        if val_metrics is not None:
+            self.add_metrics(stage=TrainerStage.val, metrics=val_metrics)
         # ICL information for loggers
         self.task = task
         self.old_classes = old_classes
         self.new_classes = new_classes
+        self.all_classes = OrderedDict(list(old_classes.items()) + list(new_classes.items()))
         # internal state
+        self.rank = get_rank()
+        self.is_main = self.rank == 0
         self.current_epoch = -1
         self.global_step = -1
         # internal monitoring
@@ -79,6 +92,8 @@ class Trainer:
         self.best_epoch = None
         self.best_score = None
         self.best_state_dict = None
+        self.sample_batches = samples
+        self.sample_content = list()
         self.callbacks: listdir[BaseCallback] = list()
 
     def _prepare(self, train_dataloader: DataLoader, val_dataloader: DataLoader = None) -> None:
@@ -122,17 +137,25 @@ class Trainer:
                 continue
             self.logger.log_scalar(f"{stage.value}/{metric_name}", score)
             log_strings.append(f"{stage.value}/{metric_name}: {score:.4f}")
-            LOG.info(", ".join(log_strings))
+        # log the full string once completed
+        LOG.info(", ".join(log_strings))
         # then log class-wise results in a single table
         if classwise:
             LOG.debug("Classwise: %s", str(classwise))
-            header = list(self.new_classes.values())
+            header = list(self.all_classes.values())
             self.logger.log_results(f"{stage.value}/results", headers=header, results=classwise)
 
     def _debug_training(self, **kwargs: dict) -> None:
         LOG.debug("[Epoch %2d] - iteration: %d", self.current_epoch, self.global_step)
         for name, item in kwargs.items():
             LOG.debug("%8s: %s", name, str(item))
+
+    def _store_samples(self, images: torch.Tensor, outputs: torch.Tensor, targets: torch.Tensor) -> None:
+        for i in range(images.size(0)):
+            image = images[i].detach().cpu()
+            true_mask = targets[i].detach().cpu()
+            pred_mask = outputs[i].detach().cpu()
+            self.sample_content.append((image, true_mask, pred_mask))
 
     def add_callback(self, callback: BaseCallback) -> Trainer:
         self.callbacks.append(callback)
@@ -146,6 +169,10 @@ class Trainer:
         for callback in self.callbacks:
             callback.dispose(self)
 
+    def add_metrics(self, stage: TrainerStage, metrics: Dict[str, Metric]) -> Trainer:
+        assert stage.value not in self.metrics, "stage already present in metrics"
+        self.metrics[stage.value] = metrics
+
     def step(self) -> None:
         self.global_step += 1
         self.logger.step()
@@ -157,16 +184,17 @@ class Trainer:
         # init losses and retrieve x, y
         x, y = batch
         # forward and loss on segmentation task
-        new_out, new_features = self.model(x)
-        seg_loss = self.criterion(new_out, y)
-        # forward and loss on knowledge distillation task
-        if self.task.step > 0:
-            old_out, old_features = self.old_model(x)
-            kdd_loss = self.criterion_kdd(new_out, old_out)
-        else:
-            kdd_loss = torch.tensor(0, device=seg_loss.device, dtype=seg_loss.dtype)
-        # total loss, gather stuff and update metrics
-        total_loss = seg_loss + kdd_loss
+        with autocast():
+            new_out, new_features = self.model(x)
+            seg_loss = self.criterion(new_out, y)
+            # forward and loss on knowledge distillation task
+            if self.task.step > 0:
+                old_out, old_features = self.old_model(x)
+                kdd_loss = self.criterion_kdd(new_out, old_out)
+            else:
+                kdd_loss = torch.tensor(0, device=seg_loss.device, dtype=seg_loss.dtype)
+            total_loss = seg_loss + kdd_loss
+        # gather and update metrics
         y_true = self.accelerator.gather(y)
         y_pred = self.accelerator.gather(new_out)
         self._update_metrics(y_true=y_true, y_pred=y_pred, stage=TrainerStage.train)
@@ -185,23 +213,30 @@ class Trainer:
         self._log_metrics(stage=TrainerStage.train)
 
     def validation_epoch_start(self):
+        self.sample_content.clear()
         self._reset_metrics(stage=TrainerStage.val)
 
-    def validation_batch(self, batch: Any):
+    def validation_batch(self, batch: Any, batch_index: int):
         # init losses and retrieve x, y
         x, y = batch
         seg_loss, kdd_loss = torch.tensor(0.0), torch.tensor(0.0)
-        # forward and loss on main task
-        new_out, new_features = self.model(x)
-        seg_loss = self.criterion(new_out, y)
-        # forward and loss for KD
-        if self.task.step > 0:
-            old_out, old_features = self.old_model(x)
-            kdd_loss = self.criterion_kdd(new_out, old_out)
-        # total loss, gather and update metrics
-        total_loss = seg_loss + kdd_loss
+        # forward and loss on main task, using AMP
+        with autocast():
+            new_out, new_features = self.model(x)
+            seg_loss = self.criterion(new_out, y)
+            # forward and loss for KD
+            if self.task.step > 0:
+                old_out, old_features = self.old_model(x)
+                kdd_loss = self.criterion_kdd(new_out, old_out)
+            total_loss = seg_loss + kdd_loss
         y_true = self.accelerator.gather(y)
         y_pred = self.accelerator.gather(new_out)
+        # store samples for visualization, if present. Requires a plot callback
+        # better to unpack now, so that we don't have to deal with the batch size later
+        if self.sample_batches is not None and batch_index in self.sample_batches:
+            images = self.accelerator.gather(x)
+            self._store_samples(images, y_pred, y_true)
+        # update metrics and return losses
         self._update_metrics(y_true=y_true, y_pred=y_pred, stage=TrainerStage.val)
         return total_loss, seg_loss, kdd_loss
 
@@ -215,33 +250,49 @@ class Trainer:
         self.logger.log_scalar("val/time", np.mean(val_times))
         self._log_metrics(stage=TrainerStage.val)
 
-    def test_batch(self, batch: Any):
+    def test_batch(self, batch: Any, batch_index: int):
         x, y = batch
-        x = x.to(self.device, non_blocking=True)
-        y = y.to(self.device, non_blocking=True)
-        preds = self.model(x)
-        loss = self.criterion(preds, y)
-        self._update_metrics(y_true=y, y_pred=preds, stage=TrainerStage.test)
-        return loss, (x, y, torch.argmax(preds, dim=1))
+        x = x.to(self.accelerator.device)
+        y = y.to(self.accelerator.device)
+        # forward and loss on main task, using AMP
+        with autocast():
+            preds, _ = self.model(x)
+            loss = self.criterion(preds, y)
+        # gather info
+        images = self.accelerator.gather(x)
+        y_true = self.accelerator.gather(y)
+        y_pred = self.accelerator.gather(preds)
+        # store samples for visualization, if present. Requires a plot callback
+        # better to unpack now, so that we don't have to deal with the batch size later
+        if self.sample_batches is not None and batch_index in self.sample_batches:
+            self._store_samples(images, y_pred, y_true)
+        # update metrics and return losses
+        self._update_metrics(y_true=y_true, y_pred=y_pred, stage=TrainerStage.test)
+        return loss, (images.cpu(), y_true.cpu(), torch.argmax(y_pred, dim=1).cpu())
 
     def train_epoch(self, epoch: int, train_dataloader: DataLoader) -> Any:
         timings = []
         losses = defaultdict(list)
-        train_tqdm = progressbar(train_dataloader, epoch=epoch, stage=TrainerStage.train.value)
+        train_tqdm = progressbar(train_dataloader,
+                                 epoch=epoch,
+                                 stage=TrainerStage.train.value,
+                                 disable=not self.is_main)
 
         self.model.train()
         for batch in train_tqdm:
             start = time.time()
             self.optimizer.zero_grad()
             loss, seg_loss, kdd_loss = self.train_batch(batch=batch)
-            self.accelerator.backward(loss)
-            self.optimizer.step()
+            # self.accelerator.backward(loss)
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
             self.scheduler.step()
+            self.scaler.update()
             # measure elapsed time
             elapsed = (time.time() - start)
             # store training info
             loss_val = loss.mean().item()
-            train_tqdm.set_postfix({"loss": loss_val})
+            train_tqdm.set_postfix({"loss": f"{loss_val:.4f}"})
             self.logger.log_scalar("train/loss_iter", loss_val)
             self.logger.log_scalar("train/lr", self.optimizer.param_groups[0]["lr"])
             self.logger.log_scalar("train/time_iter", elapsed)
@@ -255,20 +306,20 @@ class Trainer:
         return losses, timings
 
     def validation_epoch(self, epoch: int, val_dataloader: DataLoader) -> Any:
-        val_tqdm = progressbar(val_dataloader, epoch=epoch, stage=TrainerStage.val.value)
+        val_tqdm = progressbar(val_dataloader, epoch=epoch, stage=TrainerStage.val.value, disable=not self.is_main)
         timings = []
         losses = defaultdict(list)
 
         with torch.no_grad():
             self.model.eval()
-            for batch in val_tqdm:
+            for i, batch in enumerate(val_tqdm):
                 start = time.time()
-                loss, sg_loss, kd_loss = self.validation_batch(batch=batch)
+                loss, sg_loss, kd_loss = self.validation_batch(batch=batch, batch_index=i)
                 elapsed = (time.time() - start)
                 # gather info
                 loss_val = loss.mean().item()
-                val_tqdm.set_postfix({"loss": loss_val})
-                # we do not log 'iter' versions for loss and timings, since we do notadvance the logger step
+                val_tqdm.set_postfix({"loss": f"{loss_val:.4f}"})
+                # we do not log 'iter' versions for loss and timings, since we do not advance the logger step
                 # during validation (also, it's kind of useless)
                 losses["tot"].append(loss_val)
                 losses["seg"].append(sg_loss.mean().item())
@@ -306,20 +357,23 @@ class Trainer:
         self.dispose_callbacks()
         return self
 
-    def predict(self, test_dataloader: DataLoader, metrics: Dict[str, Metric], logger_exclude: Iterable[str]):
+    def predict(self, test_dataloader: DataLoader, metrics: Dict[str, Metric], logger_exclude: Iterable[str] = None):
+        logger_exclude = logger_exclude or []
         self.metrics[TrainerStage.test.value] = metrics
         self._reset_metrics(stage=TrainerStage.test)
-        test_tqdm = progressbar(test_dataloader, stage=TrainerStage.test.value)
+        test_tqdm = progressbar(test_dataloader, stage=TrainerStage.test.value, disable=not self.is_main)
         losses, timings, results = [], [], []
+        # prepare model and loader
+        self.model, test_dataloader = self.accelerator.prepare(self.model, test_dataloader)
 
         with torch.no_grad():
             self.model.eval()
-            for batch in test_tqdm:
+            for i, batch in enumerate(test_tqdm):
                 start = time.time()
-                loss, data = self.test_batch(batch=batch)
+                loss, data = self.test_batch(batch=batch, batch_index=i)
                 elapsed = (time.time() - start)
                 loss_value = loss.item()
-                test_tqdm.set_postfix({"loss": loss_value})
+                test_tqdm.set_postfix({"loss": f"{loss_value:.4f}"})
                 # we do not log 'iter' versions, as for validation
                 losses.append(loss_value)
                 timings.append(elapsed)
@@ -329,5 +383,7 @@ class Trainer:
             self.logger.log_scalar("test/time", np.mean(timings))
             self._compute_metrics(stage=TrainerStage.test)
             self._log_metrics(stage=TrainerStage.test, exclude=logger_exclude)
-
+        # iteration on callbacks for the test set (e.g. display images)
+        for callback in self.callbacks:
+            callback(self)
         return losses, results

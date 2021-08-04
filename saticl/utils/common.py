@@ -4,7 +4,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 from uuid import uuid4
 
 from torch.utils.data import DataLoader
@@ -12,7 +12,6 @@ from torch.utils.data import DataLoader
 import yaml
 from pydantic import BaseSettings
 from saticl.logging.console import DistributedLogger
-from saticl.utils.decorators import only_rank
 from tqdm import tqdm
 
 
@@ -24,9 +23,12 @@ def generate_id() -> str:
     return str(uuid4())
 
 
-@only_rank(0)
 def makedirs(path: str) -> None:
-    return os.makedirs(path)
+    try:
+        return os.makedirs(path)
+    except OSError:
+        # most likely race conditions among ranks
+        pass
 
 
 def prepare_folder(root_folder: Path, experiment_id: str = ""):
@@ -59,8 +61,8 @@ def prepare_file_logging(experiment_folder: Path, filename: str = "output.log") 
     logger.addHandler(handler)
 
 
-def progressbar(dataloder: DataLoader, epoch: int = 0, stage: str = "train"):
-    pbar = tqdm(dataloder, file=sys.stdout, unit="batch", postfix={"loss": "--"})
+def progressbar(dataloder: DataLoader, epoch: int = 0, stage: str = "train", disable: bool = False):
+    pbar = tqdm(dataloder, file=sys.stdout, unit="batch", postfix={"loss": "--"}, disable=disable)
     pbar.set_description(f"Epoch {epoch:<3d} - {stage}")
     return pbar
 
@@ -68,6 +70,14 @@ def progressbar(dataloder: DataLoader, epoch: int = 0, stage: str = "train"):
 def store_config(config: BaseSettings, path: Path) -> None:
     with open(str(path), "w") as file:
         yaml.dump(config.dict(), file)
+
+
+def load_config(path: Path, config_class: Callable) -> BaseSettings:
+    assert path.exists(), f"Missing training configuration for path: {path.parent}"
+    # load the training configuration
+    with open(str(path), "r", encoding="utf-8") as file:
+        train_params = yaml.load(file, Loader=yaml.Loader)
+    return config_class(**train_params)
 
 
 def flatten_config(config: dict, parent_key: str = "", separator: str = "/") -> Dict[str, Any]:

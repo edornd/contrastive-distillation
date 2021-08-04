@@ -22,15 +22,19 @@ from typing import List, Tuple
 import numpy as np
 import torch
 from accelerate import Accelerator
+from torch.cuda import amp
 from torch.optim.lr_scheduler import OneCycleLR
 from torch.utils.data import DataLoader
 
 import albumentations as alb
 from albumentations.pytorch import ToTensorV2
+from inplace_abn import InPlaceABNSync
 from timm import create_model
+from tqdm import tqdm
 
 # ugly fix to import from package
 sys.path.append("../")
+
 from saticl.datasets.isprs import PotsdamDataset
 from saticl.models import create_decoder
 
@@ -84,7 +88,7 @@ def mask_set(dataset_length: int,
 
 def training_function(config, args):
     # Initialize accelerator
-    accelerator = Accelerator(fp16=args.fp16, cpu=args.cpu)
+    accelerator = Accelerator(fp16=False, cpu=args.cpu)
 
     # Sample hyper-parameters for learning rate, batch size, seed and a few other HPs
     lr = config["lr"]
@@ -119,13 +123,13 @@ def training_function(config, args):
     eval_dataset.add_mask(val_split)
 
     # Instantiate dataloaders.
-    train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=batch_size, num_workers=4)
-    eval_dataloader = DataLoader(eval_dataset, shuffle=False, batch_size=batch_size, num_workers=4)
+    train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=batch_size, num_workers=8)
+    eval_dataloader = DataLoader(eval_dataset, shuffle=False, batch_size=batch_size, num_workers=8)
 
     # Instantiate the model (we build the model here so that the seed also control new weights initialization)
-    act_layer = partial(torch.nn.ReLU, inplace=True)
-    norm_layer = torch.nn.BatchNorm2d
-    encoder = create_model("resnet50d", pretrained=True, features_only=True, num_classes=len(label_to_id))
+    act_layer = torch.nn.Identity    # partial(torch.nn.ReLU, inplace=True)
+    norm_layer = partial(InPlaceABNSync, activation="leaky_relu", activation_param=0.01)
+    encoder = create_model("tresnet_l", pretrained=True, features_only=True, num_classes=len(label_to_id))
     decoder = create_decoder("unet", encoder.feature_info, act_layer=act_layer, norm_layer=norm_layer)
 
     # We could avoid this line since the accelerator is set with `device_placement=True` (default value).
@@ -134,56 +138,59 @@ def training_function(config, args):
     model = Segmenter(encoder, decoder, num_classes=len(label_to_id))
     model = model.to(accelerator.device)
 
-    # Freezing the base model
-    for param in model.encoder.parameters():
-        param.requires_grad = False
-
     # Instantiate optimizer
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=lr / 25)
+    optimizer = torch.optim.Adam(params=model.parameters(), lr=lr)
 
     # Prepare everything
     # There is no specific order to remember, we just need to unpack the objects in the same order we gave them to the
     # prepare method.
     model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(model, optimizer, train_dataloader,
                                                                               eval_dataloader)
-    # create loss
+    # create loss and scaler
     criterion = torch.nn.CrossEntropyLoss(ignore_index=255, reduction=args.reduction)
+    scaler = amp.grad_scaler.GradScaler() if args.fp16 else None
     # Instantiate learning rate scheduler after preparing the training dataloader as the prepare method
     # may change its length.
     lr_scheduler = OneCycleLR(optimizer=optimizer, max_lr=lr, epochs=num_epochs, steps_per_epoch=len(train_dataloader))
     # Now we train the model
     try:
         for epoch in range(num_epochs):
+            accelerator.print(f"[Epoch {epoch:2d}]")
             model.train()
-            for step, (x, y) in enumerate(train_dataloader):
+            pbar = tqdm(train_dataloader)
+            for x, y in pbar:
                 # We could avoid this line since we set the accelerator with `device_placement=True`.
-                x = x.to(accelerator.device)
-                y = y.to(accelerator.device).long()
-                outputs = model(x)
-                loss = criterion(outputs, y)
-                accelerator.backward(loss)
-                accelerator.print(loss.item())
-                optimizer.step()
+                if args.fp16:
+                    with amp.autocast():
+                        outputs = model(x)
+                        loss = criterion(outputs, y.long())
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    outputs = model(x)
+                    loss = criterion(outputs, y.long())
+                    accelerator.print(loss.dtype)
+                    accelerator.backward(loss)
                 lr_scheduler.step()
                 optimizer.zero_grad()
+                pbar.set_postfix(dict(loss=f"{loss.item():.4f}"))
 
             model.eval()
             accurate = 0
             num_elems = 0
-            for step, (x, y) in enumerate(eval_dataloader):
-                # We could avoid this line since we set the accelerator with `device_placement=True`.
-                x = x.to(accelerator.device)
-                y = y.to(accelerator.device).long()
+            accelerator.print("Evaluating...")
+            for x, y in tqdm(eval_dataloader):
                 with torch.no_grad():
                     outputs = model(x)
-                predictions = outputs.argmax(dim=-1)
+                predictions = outputs.argmax(dim=1)
                 accurate_preds = accelerator.gather(predictions) == accelerator.gather(y)
-                num_elems += accurate_preds.shape[0]
+                num_elems += accurate_preds.numel()
                 accurate += accurate_preds.long().sum()
 
-        eval_metric = accurate.item() / num_elems
-        # Use accelerator.print to print only on the main process.
-        accelerator.print(f"epoch {epoch}: {100 * eval_metric:.2f}")
+            eval_metric = accurate.item() / num_elems
+            # Use accelerator.print to print only on the main process.
+            accelerator.print(f"epoch {epoch}: {100 * eval_metric:.2f}")
     except KeyboardInterrupt:
         exit(0)
 
@@ -195,7 +202,7 @@ def main():
     parser.add_argument("--fp16", action="store_true", help="If passed, will use FP16 training.")
     parser.add_argument("--cpu", action="store_true", help="If passed, will train on the CPU.")
     args = parser.parse_args()
-    config = {"lr": 3e-2, "num_epochs": 3, "seed": 42, "batch_size": 8, "image_size": 512}
+    config = {"lr": 1e-3, "num_epochs": 3, "seed": 42, "batch_size": 8, "image_size": 512}
     training_function(config, args)
 
 

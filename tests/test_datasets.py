@@ -101,7 +101,7 @@ def test_dataset_potsdam_icl_step1(potsdam_path: Path):
     val_dataset.add_mask(val_mask, stage="valid")
     original_length = len(train_dataset)
 
-    task = Task(dataset="potsdam", name="222a", step=1)
+    task = Task(dataset="potsdam", name="222a", step=1, add_background=not train_dataset.has_background())
     icl_set = ICLDataset(train_dataset, task, overlap=True)
     # check it includes the previously missing background + handpicked check
     assert len(icl_set.categories()) == 7
@@ -113,7 +113,7 @@ def test_dataset_potsdam_icl_step1(potsdam_path: Path):
     LOG.info("ICL transf : %s", str(icl_set.label_transform))
     assert icl_set.label2index == {0: 0, 1: 1, 3: 2, 2: 3, 4: 4, 255: 0}
     assert icl_set.index2label == {0: 255, 1: 1, 2: 3, 3: 2, 4: 4}
-    assert icl_set.label_transform == {1: 1, 2: 3, 3: 2, 4: 4, 5: 0, 6: 0, 0: 0}
+    assert icl_set.label_transform == {1: 0, 2: 3, 3: 0, 4: 4, 5: 0, 6: 0, 0: 0}
     # check every image
     loader = DataLoader(icl_set, batch_size=4, num_workers=8)
     for image, mask in tqdm(loader):
@@ -121,7 +121,7 @@ def test_dataset_potsdam_icl_step1(potsdam_path: Path):
         assert mask.shape == (4, 512, 512)
         # labels = np.unique(mask.numpy())
         # LOG.info(str(labels))
-        assert torch.all(sum(mask == i for i in (0, 1, 2, 3, 4)).bool())
+        assert torch.all(sum(mask == i for i in (0, 3, 4)).bool())
 
 
 def test_dataset_potsdam_icl_step2(potsdam_path: Path):
@@ -149,7 +149,7 @@ def test_dataset_potsdam_icl_step2(potsdam_path: Path):
     LOG.info("ICL transf : %s", str(icl_set.label_transform))
     assert icl_set.label2index == {0: 0, 1: 1, 3: 2, 2: 3, 4: 4, 5: 5, 6: 6, 255: 0}
     assert icl_set.index2label == {0: 255, 1: 1, 2: 3, 3: 2, 4: 4, 5: 5, 6: 6}
-    assert icl_set.label_transform == {1: 1, 2: 3, 3: 2, 4: 4, 5: 5, 6: 6, 0: 0}
+    assert icl_set.label_transform == {1: 0, 2: 0, 3: 0, 4: 0, 5: 5, 6: 6, 0: 0}
     # check every image
     loader = DataLoader(icl_set, batch_size=4, num_workers=8)
     for image, mask in tqdm(loader):
@@ -157,4 +157,4 @@ def test_dataset_potsdam_icl_step2(potsdam_path: Path):
         assert mask.shape == (4, 512, 512)
         # labels = np.unique(mask.numpy())
         # LOG.info(str(labels))
-        assert torch.all(sum(mask == i for i in (0, 1, 2, 3, 4, 5, 6)).bool())
+        assert torch.all(sum(mask == i for i in (0, 5, 6)).bool())

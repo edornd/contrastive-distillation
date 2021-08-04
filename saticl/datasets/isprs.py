@@ -13,6 +13,15 @@ from saticl.datasets.base import DatasetBase
 class ISPRSDataset(DatasetBase):
 
     _categories = {0: "impervious_surfaces", 1: "building", 2: "low_vegetation", 3: "tree", 4: "car", 5: "clutter"}
+    _palette = {
+        0: (255, 255, 255),
+        1: (0, 0, 175),
+        2: (0, 175, 255),
+        3: (0, 255, 0),
+        4: (255, 175, 0),
+        5: (175, 0, 0),
+        255: (0, 0, 0)
+    }
 
     def __init__(self,
                  path: Path,
@@ -63,6 +72,9 @@ class ISPRSDataset(DatasetBase):
 
     def categories(self) -> Dict[int, str]:
         return self._categories
+
+    def palette(self) -> Dict[int, tuple]:
+        return self._palette
 
     def ignore_index(self) -> int:
         return self._ignore_index

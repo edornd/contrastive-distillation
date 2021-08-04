@@ -71,46 +71,56 @@ class CombinedLoss(nn.Module):
 
 class UnbiasedCrossEntropy(nn.Module):
 
-    def __init__(self, old_classes=None, reduction='mean', ignore_index=255):
+    def __init__(self, old_class_count: int, reduction: str = "mean", ignore_index: int = 255):
         super().__init__()
         self.reduction = reduction
         self.ignore_index = ignore_index
-        self.old_classes = old_classes
+        self.old_class_count = old_class_count
 
-    def forward(self, inputs, targets):
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
 
-        oc = self.old_classes
-        outputs = torch.zeros_like(inputs)    # B, C (1+V+N), H, W
-        den = torch.logsumexp(inputs, dim=1)    # B, H, W       den of softmax
-        outputs[:, 0] = torch.logsumexp(inputs[:, 0:oc], dim=1) - den    # B, H, W       p(O)
-        outputs[:, oc:] = inputs[:, oc:] - den.unsqueeze(dim=1)    # B, N, H, W    p(N_i)
+        oc = self.old_class_count
+        # contruct a zero-initialized tensor with same dims as input [batch, (bkgr + old + new), height, width]
+        outputs = torch.zeros_like(inputs)
+        # build log sum(exp(inputs))  [batch, height, width], denominator for the softmax
+        denominator = torch.logsumexp(inputs, dim=1)
+        # compute the softmax for background (based on old classes) and new classes (minus operator because of logs)
+        outputs[:, 0] = torch.logsumexp(inputs[:, :oc], dim=1) - denominator    # [batch, h, w] p(O)
+        outputs[:, oc:] = inputs[:, oc:] - denominator.unsqueeze(dim=1)    # [batch, new, h, w] p(new_i)
 
         labels = targets.clone()    # B, H, W
-        labels[targets < oc] = 0    # just to be sure that all labels old belongs to zero
-
+        labels[targets < oc] = 0    # just make sure we are not considering any of the old classes
         loss = func.nll_loss(outputs, labels, ignore_index=self.ignore_index, reduction=self.reduction)
         return loss
 
 
 class UnbiasedFocalLoss(nn.Module):
 
-    def __init__(self, old_classes=None, reduction="mean", ignore_index=255, alpha=1, gamma=2):
+    def __init__(self,
+                 old_class_count: int,
+                 reduction: str = "mean",
+                 ignore_index: int = 255,
+                 alpha: float = 1.0,
+                 gamma: float = 2.0):
         super().__init__()
         self.reduction = reduction
         self.ignore_index = ignore_index
-        self.old_classes = old_classes
+        self.old_class_count = old_class_count
         self.alpha = alpha
         self.gamma = gamma
 
-    def forward(self, inputs, targets):
-        oc = self.old_classes
-        outputs = torch.zeros_like(inputs)    # B, C (1+V+N), H, W
-        den = torch.logsumexp(inputs, dim=1)    # B, H, W       den of softmax
-        outputs[:, 0] = torch.logsumexp(inputs[:, 0:oc], dim=1) - den    # B, H, W       p(O)
-        outputs[:, oc:] = inputs[:, oc:] - den.unsqueeze(dim=1)    # B, N, H, W    p(N_i)
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        oc = self.old_class_count
+        # same as before, build the container tensor [batch, (bkgr, old, new), h, w]
+        outputs = torch.zeros_like(inputs)
+        # compute the denominator, a.k.a sum(exp(predictions)) [batch, h, w]
+        denominator = torch.logsumexp(inputs, dim=1)
+        # compute sum(p(0) + p(old)) for p(background), standard softmax for p(new)
+        outputs[:, 0] = torch.logsumexp(inputs[:, 0:oc], dim=1) - denominator
+        outputs[:, oc:] = inputs[:, oc:] - denominator.unsqueeze(dim=1)
 
         labels = targets.clone()    # B, H, W
-        labels[targets < oc] = 0    # just to be sure that all labels old belongs to zero
+        labels[targets < oc] = 0    # just make sure we are not considering any of the old classes
         ce = func.nll_loss(outputs, labels, ignore_index=self.ignore_index, reduction="none")
         loss = self.alpha * (1 - torch.exp(-ce))**self.gamma * ce
         return loss
