@@ -21,6 +21,11 @@ ICL_ISPRS = {
         1: [1, 3],    # building (1), high vegetation(3)
         2: [4, 5]    # car (4), clutter (5)
     },
+    "321": {
+        0: [1, 3, 5],    # building(1), high veg. (3), clutter (5)
+        1: [0, 2],       # surface (0), low veg. (2)
+        2: [4]           # car (4)
+    },
     "1-5s": {
         0: [1],
         1: [2],

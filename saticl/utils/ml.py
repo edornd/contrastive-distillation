@@ -234,5 +234,11 @@ def mask_set(dataset_length: int,
     train_mask = mask < (1 - (val_size + test_size))
     val_mask = (mask >= (1 - (val_size + test_size))) & (mask < 1 - test_size)
     test_mask = mask >= (1 - test_size)
-
+    # just checking indices
+    train_indices = np.argwhere(np.array(train_mask))
+    valid_indices = np.argwhere(np.array(val_mask))
+    test_indices = np.argwhere(np.array(test_mask))
+    assert len(np.intersect1d(train_indices, valid_indices)) == 0
+    assert len(np.intersect1d(train_indices, test_indices)) == 0
+    # we checked they are not overlapping, good to go
     return train_mask, val_mask, test_mask

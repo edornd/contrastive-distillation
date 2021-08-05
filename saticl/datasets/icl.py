@@ -13,7 +13,12 @@ LOG = get_logger(__name__)
 
 class ICLDataset(DatasetBase):
 
-    def __init__(self, dataset: DatasetBase, task: Task, mask_value: int = 0, overlap: bool = True) -> None:
+    def __init__(self,
+                 dataset: DatasetBase,
+                 task: Task,
+                 mask_value: int = 0,
+                 overlap: bool = True,
+                 mask_old: bool = True) -> None:
         super().__init__()
         self.dataset = dataset
         self.task = task
@@ -46,7 +51,8 @@ class ICLDataset(DatasetBase):
         # prepare a similar lookup, including all available classes
         self.label_transform = dict()
         for key in self._categories:
-            substitute = self.label2index.get(key, mask_value) if key in new_labels else mask_value
+            available = new_labels if mask_old else old_labels.union(new_labels)
+            substitute = self.label2index.get(key, mask_value) if key in available else mask_value
             self.label_transform[key] = substitute
 
     def _process_labels(self, labels: OrderedSet) -> OrderedSet:

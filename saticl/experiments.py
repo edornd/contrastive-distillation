@@ -207,8 +207,8 @@ def train(config: Configuration):
     if task.step > 0 and config.ce.unbiased:
         seg_loss_name = str(type(segment_loss))
         kdd_loss_name = str(type(distill_loss))
-        assert seg_loss_name.startswith("Unbiased"), f"Wrong loss '{seg_loss_name}' for step {task.step}"
-        assert kdd_loss_name.startswith("Unbiased"), f"Wrong loss '{kdd_loss_name}' for step {task.step}"
+        assert "Unbiased" in seg_loss_name, f"Wrong loss '{seg_loss_name}' for step {task.step}"
+        assert "Unbiased" in kdd_loss_name, f"Wrong loss '{kdd_loss_name}' for step {task.step}"
     # prepare metrics and logger
     monitored = config.trainer.monitor.name
     train_metrics, valid_metrics = prepare_metrics(task=task, device=accelerator.device)
@@ -290,7 +290,7 @@ def test(test_config: TestConfiguration):
                 name=config.task.name,
                 step=config.task.step,
                 add_background=add_background)
-    test_set = ICLDataset(dataset=test_dataset, task=task, mask_value=0, overlap=config.task.overlap)
+    test_set = ICLDataset(dataset=test_dataset, task=task, mask_value=0, overlap=config.task.overlap, mask_old=False)
     test_loader = DataLoader(dataset=test_set,
                              batch_size=test_config.trainer.batch_size,
                              shuffle=False,
