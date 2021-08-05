@@ -8,7 +8,6 @@ import torch
 from saticl.utils.common import get_logger, prepare_folder
 from saticl.utils.ml import make_grid, mask_to_rgb
 
-
 if TYPE_CHECKING:
     from saticl.trainer.base import Trainer
 
@@ -126,6 +125,7 @@ class Checkpoint(BaseCallback):
             return True
         # if save only best iterations, check that the current one is better
         if self.save_best and (not self.best_epoch or self.best_epoch < trainer.best_epoch):
+            self.best_epoch = trainer.best_epoch
             return True
         return False
 
@@ -140,6 +140,9 @@ class Checkpoint(BaseCallback):
             trainer.accelerator.save(unwrapped_model.state_dict(), filename)
             if self.verbose:
                 LOG.info("[Epoch %2d] Checkpoint saved: %s", trainer.current_epoch, str(filename))
+        else:
+            if self.verbose:
+                LOG.info("[Epoch %2d] No checkpoint saved")
 
     def dispose(self, trainer: "Trainer"):
         self.best_epoch = None
