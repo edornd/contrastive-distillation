@@ -105,3 +105,6 @@ class AgriVisionDataset(DatasetBase):
 
     def ignore_index(self) -> int:
         return self._ignore_index
+
+    def has_background(self) -> bool:
+        return True

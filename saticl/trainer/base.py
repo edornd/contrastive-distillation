@@ -86,6 +86,7 @@ class Trainer:
         self.rank = get_rank()
         self.is_main = self.rank == 0
         self.current_epoch = -1
+        self.current_loss = None
         self.global_step = -1
         # internal monitoring
         self.current_scores = {TrainerStage.train.value: dict(), TrainerStage.val.value: dict()}
@@ -291,6 +292,7 @@ class Trainer:
             # measure elapsed time
             elapsed = (time.time() - start)
             # store training info
+            self.current_loss = loss.mean()
             loss_val = loss.mean().item()
             train_tqdm.set_postfix({"loss": f"{loss_val:.4f}"})
             self.logger.log_scalar("train/loss_iter", loss_val)

@@ -75,6 +75,10 @@ class EarlyStopping(BaseCallback):
         self.patience_counter = 0
 
     def call(self, trainer: "Trainer", *args: Any, **kwargs: Any) -> Any:
+        # first, a quick check for nan losses, since it happens often in AMP
+        if trainer.current_loss is not None and torch.isnan(trainer.current_loss):
+            LOG.info("[Epoch %d] NaN loss detected, interrupting the training loop", trainer.current_epoch)
+            raise KeyboardInterrupt
         # wait for everyone should not be needed, since scores are already computed
         # after we have waited every process, but better to be safe
         current_score = trainer.current_scores["val"][self.metric]

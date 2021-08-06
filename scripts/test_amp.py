@@ -88,7 +88,7 @@ def mask_set(dataset_length: int,
 
 def training_function(config, args):
     # Initialize accelerator
-    accelerator = Accelerator(fp16=False, cpu=args.cpu)
+    accelerator = Accelerator(fp16=args.fp16, cpu=args.cpu)
 
     # Sample hyper-parameters for learning rate, batch size, seed and a few other HPs
     lr = config["lr"]
@@ -132,7 +132,6 @@ def training_function(config, args):
     encoder = create_model("tresnet_l", pretrained=True, features_only=True, num_classes=len(label_to_id))
     decoder = create_decoder("unet", encoder.feature_info, act_layer=act_layer, norm_layer=norm_layer)
 
-    # We could avoid this line since the accelerator is set with `device_placement=True` (default value).
     # Note that if you are placing tensors on devices manually, this line absolutely needs to be before the optimizer
     # creation otherwise training will not work on TPU (`accelerate` will kindly throw an error to make us aware of that).
     model = Segmenter(encoder, decoder, num_classes=len(label_to_id))
@@ -148,7 +147,7 @@ def training_function(config, args):
                                                                               eval_dataloader)
     # create loss and scaler
     criterion = torch.nn.CrossEntropyLoss(ignore_index=255, reduction=args.reduction)
-    scaler = amp.grad_scaler.GradScaler() if args.fp16 else None
+    # scaler = amp.grad_scaler.GradScaler() if args.fp16 else None
     # Instantiate learning rate scheduler after preparing the training dataloader as the prepare method
     # may change its length.
     lr_scheduler = OneCycleLR(optimizer=optimizer, max_lr=lr, epochs=num_epochs, steps_per_epoch=len(train_dataloader))
@@ -159,22 +158,20 @@ def training_function(config, args):
             model.train()
             pbar = tqdm(train_dataloader)
             for x, y in pbar:
-                # We could avoid this line since we set the accelerator with `device_placement=True`.
-                if args.fp16:
-                    with amp.autocast():
-                        outputs = model(x)
-                        loss = criterion(outputs, y.long())
-                    scaler.scale(loss).backward()
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
+                # with amp.autocast():
+                #     outputs = model(x)
+                #     loss = criterion(outputs, y.long())
+                # scaler.scale(loss).backward()
+                # scaler.step(optimizer)
+                # scaler.update()
+
+                with accelerator.autocast():
                     outputs = model(x)
                     loss = criterion(outputs, y.long())
-                    accelerator.print(loss.dtype)
-                    accelerator.backward(loss)
+                accelerator.backward(loss)
                 lr_scheduler.step()
                 optimizer.zero_grad()
-                pbar.set_postfix(dict(loss=f"{loss.item():.4f}"))
+                pbar.set_postfix(dict(loss=f"{loss.item():.4f}", type=f"{loss.dtype}"))
 
             model.eval()
             accurate = 0
