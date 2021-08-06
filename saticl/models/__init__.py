@@ -5,6 +5,7 @@ from torch import nn
 import timm
 from saticl.models.base import Decoder, Encoder
 from saticl.models.decoders import available_decoders
+from saticl.utils.ml import expand_input
 from timm.models.features import FeatureInfo
 
 
@@ -19,8 +20,14 @@ def filter_encoder_args(encoder: str, **kwargs: dict) -> dict:
     return kwargs
 
 
-def create_encoder(name: str, decoder: str, pretrained: bool, freeze: bool, output_stride: int,
-                   act_layer: Type[nn.Module], norm_layer: Type[nn.Module]) -> Encoder:
+def create_encoder(name: str,
+                   decoder: str,
+                   pretrained: bool,
+                   freeze: bool,
+                   output_stride: int,
+                   act_layer: Type[nn.Module],
+                   norm_layer: Type[nn.Module],
+                   channels: int = 3) -> Encoder:
     # assert that the encoder exists or is among custom ones
     assert timm.list_models(name), f"Encoder '{name}' not implemented"
     assert decoder in available_decoders, f"Decoder '{name}' not implemented"
@@ -30,6 +37,8 @@ def create_encoder(name: str, decoder: str, pretrained: bool, freeze: bool, outp
     # create the encoder
     indices = available_decoders[decoder].func.required_indices(encoder=name)
     model = timm.create_model(name, pretrained=pretrained, features_only=True, out_indices=indices, **additional_args)
+    if channels > 3:
+        model = expand_input(model)
     # freeze layers in the encoder if required
     if freeze:
         for param in model.parameters():

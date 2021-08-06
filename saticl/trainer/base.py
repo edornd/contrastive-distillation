@@ -194,7 +194,6 @@ class Trainer:
                 kdd_loss = self.criterion_kdd(new_out, old_out)
             else:
                 kdd_loss = torch.tensor(0, device=seg_loss.device, dtype=seg_loss.dtype)
-            total_loss = seg_loss + kdd_loss
         # gather and update metrics
         y_true = self.accelerator.gather(y)
         y_pred = self.accelerator.gather(new_out)
@@ -202,7 +201,7 @@ class Trainer:
         # debug if active
         if self.debug:
             self._debug_training(x=x.dtype, y=y.dtype, pred=new_out.dtype, seg_loss=seg_loss, kdd_loss=kdd_loss)
-        return total_loss, seg_loss, kdd_loss
+        return seg_loss, kdd_loss
 
     def train_epoch_end(self, train_losses: list, train_times: list):
         with torch.no_grad():
@@ -229,7 +228,6 @@ class Trainer:
             if self.task.step > 0:
                 old_out, old_features = self.old_model(x)
                 kdd_loss = self.criterion_kdd(new_out, old_out)
-            total_loss = seg_loss + kdd_loss
         y_true = self.accelerator.gather(y)
         y_pred = self.accelerator.gather(new_out)
         # store samples for visualization, if present. Requires a plot callback
@@ -239,7 +237,7 @@ class Trainer:
             self._store_samples(images, y_pred, y_true)
         # update metrics and return losses
         self._update_metrics(y_true=y_true, y_pred=y_pred, stage=TrainerStage.val)
-        return total_loss, seg_loss, kdd_loss
+        return seg_loss, kdd_loss
 
     def validation_epoch_end(self, val_losses: list, val_times: list):
         with torch.no_grad():
@@ -283,15 +281,18 @@ class Trainer:
         for batch in train_tqdm:
             start = time.time()
             self.optimizer.zero_grad()
-            loss, seg_loss, kdd_loss = self.train_batch(batch=batch)
-            # self.accelerator.backward(loss)
-            self.scaler.scale(loss).backward()
+            seg_loss, kdd_loss = self.train_batch(batch=batch)
+            # self.accelerator.backward(loss) should now work
+            self.scaler.scale(seg_loss).backward(retain_graph=(self.task.step > 0))
+            if self.task.step > 0:
+                self.scaler.scale(kdd_loss).backward()
             self.scaler.step(self.optimizer)
             self.scheduler.step()
             self.scaler.update()
             # measure elapsed time
             elapsed = (time.time() - start)
             # store training info
+            loss = seg_loss + kdd_loss
             self.current_loss = loss.mean()
             loss_val = loss.mean().item()
             train_tqdm.set_postfix({"loss": f"{loss_val:.4f}"})
@@ -316,9 +317,10 @@ class Trainer:
             self.model.eval()
             for i, batch in enumerate(val_tqdm):
                 start = time.time()
-                loss, sg_loss, kd_loss = self.validation_batch(batch=batch, batch_index=i)
+                sg_loss, kd_loss = self.validation_batch(batch=batch, batch_index=i)
                 elapsed = (time.time() - start)
                 # gather info
+                loss = sg_loss + kd_loss
                 loss_val = loss.mean().item()
                 val_tqdm.set_postfix({"loss": f"{loss_val:.4f}"})
                 # we do not log 'iter' versions for loss and timings, since we do not advance the logger step

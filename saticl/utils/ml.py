@@ -15,6 +15,7 @@ from matplotlib import pyplot as plt
 from pydantic.env_settings import BaseSettings
 from saticl.datasets.transforms import Denormalize
 from saticl.utils import common as utils
+from timm.models.tresnet import SpaceToDepthModule
 from torchsummary import summary
 
 F32_EPS = np.finfo(np.float32).eps
@@ -99,6 +100,16 @@ def _copy_channel(layer: nn.Module, channel: int = 0) -> torch.Tensor:
     return torch.cat((input_weights, extra_weights), dim=1)    # obtain  [64, 4, 7, 7]
 
 
+def _copy_channel_depthwise(layer: nn.Module, copy_block: int = 0) -> torch.Tensor:
+    # layer weight should be a 3x3 conv [64, 48, 3, 3]
+    input_weights = layer.weight
+    maps_per_channel = input_weights.shape[1] // 3    # divide 48 by RGB input
+    idx_a = copy_block * maps_per_channel
+    idx_b = (copy_block + 1) * maps_per_channel
+    extra_weights = input_weights[:, idx_a:idx_b]    # obtain [64, 16, 3, 3] weights
+    return torch.cat((input_weights, extra_weights), dim=1)    # concat to make them [64, 64, 3, 3]
+
+
 def expand_input(model: nn.Module, input_layer: str = None, copy_channel: int = 0) -> nn.Module:
     # when we know the layer name
     if input_layer is not None:
@@ -111,7 +122,11 @@ def expand_input(model: nn.Module, input_layer: str = None, copy_channel: int = 
             children = list(children[0].children())
 
         assert not list(input_layer.children()), f"layer '{input_layer}' still has children!"
-        input_layer.weight = nn.Parameter(_copy_channel(input_layer, channel=copy_channel))
+        if isinstance(input_layer, SpaceToDepthModule):
+            input_layer = model["body_conv1"][0]
+            input_layer.weight = nn.Parameter(_copy_channel_depthwise(input_layer, copy_block=copy_channel))
+        else:
+            input_layer.weight = nn.Parameter(_copy_channel(input_layer, channel=copy_channel))
 
     return model
 

@@ -22,7 +22,6 @@ from typing import List, Tuple
 import numpy as np
 import torch
 from accelerate import Accelerator
-from torch.cuda import amp
 from torch.optim.lr_scheduler import OneCycleLR
 from torch.utils.data import DataLoader
 

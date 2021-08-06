@@ -78,7 +78,8 @@ def prepare_model(config: Configuration, task: Task) -> nn.Module:
                              freeze=cfg.freeze,
                              output_stride=cfg.output_stride,
                              act_layer=cfg.act,
-                             norm_layer=cfg.norm)
+                             norm_layer=cfg.norm,
+                             channels=config.in_channels)
     decoder = create_decoder(name=cfg.decoder, feature_info=encoder.feature_info, act_layer=cfg.act, norm_layer=cfg.norm)
     # extract intermediate features when encoder KD is required
     extract_features = config.kd.encoder_factor > 0
@@ -319,6 +320,7 @@ def test(test_config: TestConfiguration):
     sample_ids = list()
     if config.num_samples and config.visualize:
         sample_ids = np.random.choice(len(test_loader), config.num_samples, replace=False)
+    LOG.info("Visualize: %s, elected batches for visualization: %s", str(config.visualize), str(sample_ids))
     trainer = Trainer(accelerator=accelerator,
                       task=task,
                       new_model=model,
