@@ -146,7 +146,7 @@ class Checkpoint(BaseCallback):
                 LOG.info("[Epoch %2d] Checkpoint saved: %s", trainer.current_epoch, str(filename))
         else:
             if self.verbose:
-                LOG.info("[Epoch %2d] No checkpoint saved")
+                LOG.info("[Epoch %2d] No checkpoint saved", trainer.current_epoch)
 
     def dispose(self, trainer: "Trainer"):
         self.best_epoch = None
