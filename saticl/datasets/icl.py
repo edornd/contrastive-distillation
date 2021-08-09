@@ -26,7 +26,7 @@ class ICLDataset(DatasetBase):
         self._palette = dataset.palette().copy()
         # if the dataset doesn't include the background on its own, add it manually
         if not dataset.has_background():
-            self._categories = {(k + 1): v for k, v in self._categories.items()}
+            self._categories = {min(k + 1, 255): v for k, v in self._categories.items()}
             self._palette = {min(k + 1, 255): v for k, v in self._palette.items()}
             self._categories.update({0: "background"})
             self._palette.update({0: (0, 0, 0)})
@@ -85,6 +85,9 @@ class ICLDataset(DatasetBase):
 
     def ignore_index(self) -> int:
         return self.dataset.ignore_index()
+
+    def has_background(self) -> bool:
+        return True
 
     def __len__(self):
         return len(self.dataset)

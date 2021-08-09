@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import Any, Callable, Iterable, Optional
 
 import torch
@@ -7,10 +7,10 @@ from saticl.metrics import functional as func
 from saticl.utils.ml import identity, one_hot
 
 
-def lenient_argmax(*args: Iterable[torch.Tensor]) -> None:
+def lenient_argmax(*args: Iterable[torch.Tensor], ndims: int = 3) -> None:
     result = list()
     for tensor in args:
-        tensor = tensor.argmax(dim=1) if tensor.ndim > 3 else tensor
+        tensor = tensor.argmax(dim=1) if tensor.ndim > ndims else tensor
         result.append(tensor)
     return result
 

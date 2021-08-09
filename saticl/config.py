@@ -77,7 +77,7 @@ class ActivationLayers(CallableEnum):
 
 class TrainerConfig(BaseSettings):
     cpu: bool = Field(False, description="Whether to use CPU or not")
-    amp: bool = Field(False, description="Whether to use mixed precision (native)")
+    amp: bool = Field(True, description="Whether to use mixed precision (native)")
     batch_size: int = Field(8, description="Batch size for training")
     num_workers: int = Field(8, description="Number of workers per dataloader")
     max_epochs: int = Field(100, description="How many epochs")
@@ -160,6 +160,11 @@ class ModelConfig(BaseSettings):
         return v
 
 
+class SSLModelConfig(ModelConfig):
+    encoder_ir: str = Field("resnet34", description="Which backbone to use for IR")
+    pretext_classes: int = Field(4, description="How many classes for the SSL task, typically 4 for rotation")
+
+
 class Configuration(BaseSettings):
     seed: int = Field(1337, description="Random seed for deterministic runs")
     image_size: int = Field(512, description="Size of the input images")
@@ -168,7 +173,7 @@ class Configuration(BaseSettings):
     # dataset options
     data_root: str = Field(required=True, description="Path to the dataset")
     dataset: Datasets = Field(Datasets.potsdam, description="Name of the dataset")
-    has_val: bool = Field(False, description="True when an ad-hoc val set is present (usually False)")
+    has_val: bool = Field(True, description="True when an ad-hoc val set is present (usually False)")
     val_size: float = Field(0.1, description="Portion of train set to use for validation")
     # ML options
     model: ModelConfig = ModelConfig()
@@ -198,6 +203,11 @@ class Configuration(BaseSettings):
         else:
             raise NotImplementedError(f"Method '{v}' not yet implemented")
         return v
+
+
+class SSLConfiguration(Configuration):
+    model: SSLModelConfig = SSLModelConfig()
+    ssl_loss: Losses = Field(Losses.crossent, description="Which loss for self supervision")
 
 
 class TestConfiguration(Configuration):

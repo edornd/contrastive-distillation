@@ -54,18 +54,16 @@ class ICLSegmenter(nn.Module):
         self.classes_total = sum(classes)
         self.return_features = return_features
 
-    def forward_features(self, x: torch.Tensor) -> Tuple[torch.Tensor, ...]:
-        encoder_out = self.encoder(x)
+    def forward_features(self, inputs: Tuple[torch.Tensor, ...]) -> Tuple[torch.Tensor, ...]:
+        encoder_out = self.encoder(inputs)
         decoder_out = self.decoder(encoder_out)
         head_out = torch.cat([head(decoder_out) for head in self.classifiers], dim=1)
         return head_out, (encoder_out, decoder_out)
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, ...]:
-        out, features = self.forward_features(x)
-        if self.return_features:
-            return out, features
-        else:
-            return out, None
+    def forward(self, inputs: Tuple[torch.Tensor, ...]) -> Tuple[torch.Tensor, ...]:
+        out, features = self.forward_features(inputs)
+        features = features if self.return_features else None
+        return out, features
 
     def init_classifier(self):
         assert len(self.classifiers) >= 2, "Cannot init a new classifier at step 0!"

@@ -1,9 +1,9 @@
 import logging
 
 import click
-from saticl import experiments
+from saticl import testing, training
 from saticl.cli import command
-from saticl.config import Configuration, TestConfiguration
+from saticl.config import Configuration, SSLConfiguration, TestConfiguration
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 INFO_FMT = "%(asctime)s - %(name)s  [%(levelname)s]: %(message)s"
@@ -26,7 +26,15 @@ def train(config: Configuration):
     log_level = logging.DEBUG if config.debug else logging.INFO
     log_format = DEBUG_FMT if config.debug else INFO_FMT
     init_logging(log_level, log_format, DATE_FMT)
-    return experiments.train(config)
+    return training.train(config)
+
+
+@command(config=SSLConfiguration)
+def train_ssl(config: SSLConfiguration):
+    log_level = logging.DEBUG if config.debug else logging.INFO
+    log_format = DEBUG_FMT if config.debug else INFO_FMT
+    init_logging(log_level, log_format, DATE_FMT)
+    return training.train_ssl(config)
 
 
 @command(config=TestConfiguration)
@@ -34,11 +42,21 @@ def test(config: TestConfiguration):
     log_level = logging.DEBUG if config.debug else logging.INFO
     log_format = DEBUG_FMT if config.debug else INFO_FMT
     init_logging(log_level, log_format, DATE_FMT)
-    return experiments.test(config)
+    return testing.test(config)
+
+
+@command(config=TestConfiguration)
+def test_ssl(config: TestConfiguration):
+    log_level = logging.DEBUG if config.debug else logging.INFO
+    log_format = DEBUG_FMT if config.debug else INFO_FMT
+    init_logging(log_level, log_format, DATE_FMT)
+    return testing.test_ssl(config)
 
 
 if __name__ == "__main__":
     cli.add_command(train)
     cli.add_command(test)
+    cli.add_command(train_ssl)
+    cli.add_command(test_ssl)
     with logging_redirect_tqdm():
         cli()

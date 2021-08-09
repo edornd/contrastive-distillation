@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 ICL_ISPRS = {
     # full segmentation, without incremental stuff
-    "full": {
+    "offline": {
         0: [1, 2, 3, 4, 5, 6]
     },
     # need to increment every index by 1 in the dataset, since the 'background' class does not really exist
@@ -36,9 +36,16 @@ ICL_ISPRS = {
     }
 }
 
+ICL_AGRIVISION = {
+    "offline": {
+        0: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    },
+}
+
 available_tasks = {
     "potsdam": ICL_ISPRS,
-    "vaihingen": ICL_ISPRS
+    "vaihingen": ICL_ISPRS,
+    "agrivision": ICL_AGRIVISION
 }
 
 

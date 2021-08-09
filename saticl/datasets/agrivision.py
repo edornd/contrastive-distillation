@@ -21,7 +21,8 @@ class AgriVisionDataset(DatasetBase):
         6: "water",
         7: "waterway",
         8: "weed_cluster",
-        9: "storm_damage"    # not evaluated in the actual challenge
+        9: "storm_damage",    # not evaluated in the actual challenge, discarded
+        255: "ignored",    # ignored areas around the fields
     }
     _palette = {
         0: (0, 0, 0),    # background
@@ -33,6 +34,7 @@ class AgriVisionDataset(DatasetBase):
         6: (214, 39, 40),    # water
         7: (140, 86, 75),    # waterway
         8: (255, 127, 14),    # weed cluster
+        255: (0, 0, 0)
     }
 
     def __init__(self,
@@ -60,7 +62,7 @@ class AgriVisionDataset(DatasetBase):
             assert rgb_name == nir_name, f"ID mismatch - RGB: {rgb_name}, NIR: {nir_name}"
             self.image_names.append(rgb_name)
 
-        self.mask_files = sorted(glob.glob(str(path / subset / "gt" / "*.png")))
+        self.mask_files = sorted(glob(str(path / subset / "gt" / "*.png")))
         assert len(self.rgb_files) == len(self.mask_files), \
             f"Length mismatch: RGB: {len(self.rgb_files)} - GT: {len(self.mask_files)}"
         for rgb, gt in zip(self.rgb_files, self.mask_files):
@@ -73,12 +75,13 @@ class AgriVisionDataset(DatasetBase):
 
     def __getitem__(self, index):
         # read RGB, if also NIR is required, stack it at the bottom
-        rgb = np.array(Image.open(self.rgb_files[index]))
+        image = np.array(Image.open(self.rgb_files[index]))
         if self.channels == 4:
             nir = np.array(Image.open(self.nir_files[index]))
-            image = np.dstack((rgb, nir))
-
-        label = Image.open(self.mask_files[index])
+            image = np.dstack((image, nir))
+        # read the mask, remove any 'storm damage' and put background instead
+        label = np.array(Image.open(self.mask_files[index]))
+        label[label == 9] = 0
         # if self.size != label.size:
         #     label = F.resize(label, self.size, torchvision.transforms.InterpolationMode.NEAREST)
         #     label = np.array(label)
@@ -88,8 +91,15 @@ class AgriVisionDataset(DatasetBase):
             label = pair.get("mask")
         return image, label
 
-    def add_mask(self, mask: List[bool], stage: str) -> None:
-        return super().add_mask(mask, stage=stage)
+    def add_mask(self, mask: List[bool], stage: str = None) -> None:
+        assert len(mask) == len(self.rgb_files), \
+            f"Mask is the wrong size! Expected {len(self.rgb_files)}, got {len(mask)}"
+        self.rgb_files = [x for include, x in zip(mask, self.rgb_files) if include]
+        self.mask_files = [x for include, x in zip(mask, self.mask_files) if include]
+        if self.nir_files:
+            self.nir_files = [x for include, x in zip(mask, self.nir_files) if include]
+        if stage:
+            self.subset = stage
 
     def name(self) -> str:
         return "agrivision"

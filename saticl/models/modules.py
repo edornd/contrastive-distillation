@@ -180,3 +180,63 @@ class UNetHead(nn.Module):
         x = self.dropout(x)
         x = self.upsample(x)
         return self.out(x)
+
+
+class SSMA(nn.Module):
+    """Self-Supervised Multi-Modal Adaptation block, from https://arxiv.org/abs/1808.03833
+    """
+
+    def __init__(self,
+                 rgb_channels: int,
+                 ir_channels: int,
+                 act_layer: Type[nn.Module],
+                 norm_layer: Type[nn.Module],
+                 bottleneck_factor: int = 4):
+        super().__init__()
+        # compute input channels and bottleneck channels
+        total_chs = rgb_channels + ir_channels
+        bottleneck_chs = total_chs // bottleneck_factor
+        self.bottleneck = nn.Sequential(nn.Conv2d(total_chs, bottleneck_chs, kernel_size=3, padding=1, bias=False),
+                                        norm_layer(bottleneck_chs), act_layer(),
+                                        nn.Conv2d(bottleneck_chs, total_chs, kernel_size=3, padding=1, bias=False),
+                                        nn.Sigmoid())
+        # the output is given by the RGB network, which is supposed to be bigger
+        # also, this allows for easier integration with decoders
+        self.out_bn = norm_layer(total_chs)
+        self.out_conv = nn.Conv2d(total_chs, rgb_channels, kernel_size=3, padding=1, bias=False)
+
+    def forward(self, rgb: torch.Tensor, ir: torch.Tensor) -> torch.Tensor:
+        x1 = torch.cat((rgb, ir), dim=1)
+        x = self.bottleneck(x1)
+        x = self.out_bn(x1 + x)
+        return self.out_conv(x)
+
+
+class RotationHead(nn.Sequential):
+    """Classifier head for self-supervised classification tasks. Conceived for rotation prediction
+    tasks, but it should be reusable for other kinds of pretext classification.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        act_layer: Type[nn.Module],
+        norm_layer: Type[nn.Module],
+        hidden_dim: int = 100,
+        num_classes: int = 4,
+    ):
+        # yapf: disable
+        super().__init__(nn.Conv2d(input_dim, hidden_dim, kernel_size=1, padding=0, bias=False),
+                         norm_layer(hidden_dim),
+                         act_layer(),
+                         nn.Conv2d(hidden_dim, hidden_dim, kernel_size=3, padding=1, bias=False),
+                         norm_layer(hidden_dim),
+                         act_layer(),
+                         nn.AdaptiveAvgPool2d(output_size=1),
+                         nn.Flatten(),
+                         nn.Linear(hidden_dim, hidden_dim),
+                         norm_layer(hidden_dim),
+                         act_layer(),
+                         nn.Dropout(p=0.5),
+                         nn.Linear(hidden_dim, num_classes))
+        # yapf: enable

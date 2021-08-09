@@ -6,8 +6,9 @@ from torch.utils.data import Dataset
 
 class DatasetBase(Dataset, ABC):
 
+    @abstractmethod
     def has_background(self) -> bool:
-        return True
+        raise NotImplementedError("Implement in subclass")
 
     @abstractmethod
     def name(self) -> str:
@@ -30,6 +31,7 @@ class DatasetBase(Dataset, ABC):
         """
         raise NotImplementedError("Implement in a subclass")
 
+    @abstractmethod
     def palette(self) -> Dict[int, tuple]:
         """Returns a dictionary of <index, color tuple>, representing the color associated with the given
         category index.

@@ -9,7 +9,6 @@ from pydantic import BaseModel
 from pydantic.types import Json, JsonWrapper
 from pydantic.utils import lenient_issubclass
 
-
 SingleClickParamType = types.Union[type, ParamType]
 ClickParamType = types.Union[SingleClickParamType, types.Tuple[SingleClickParamType, ...]]
 
@@ -116,7 +115,7 @@ def get_multiple(type_: type) -> bool:
     if is_mapping(type_):
         return False
     # early out for enums
-    if issubclass(type_, Enum):
+    if isinstance(type_, Enum) or issubclass(type_, Enum):
         return False
     # For containers, we allow multiple arguments. This way, the user
     # can specify an option multiple times and click gathers all values

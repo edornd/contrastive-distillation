@@ -1,4 +1,4 @@
-from typing import Iterable
+from typing import Any, Dict, Iterable
 
 import torch
 
@@ -21,12 +21,38 @@ class Denormalize:
         """
         single_image = tensor.ndim == 3
         tensor = tensor.unsqueeze(0) if single_image else tensor
-        for t, m, s in zip(tensor, self.mean, self.std):
-            t[:3].mul_(s).add_(m)
+        channels = tensor.size(1)
+        # slice to support 1 to 3 channels
+        means = self.mean[:channels]
+        stds = self.std[:channels]
+        for t, mean, std in zip(tensor, means, stds):
+            t[:3].mul_(std).add_(mean)
         # swap from [B, C, H, W] to [B, H, W, C]
         tensor = tensor.permute(0, 2, 3, 1)
         tensor = tensor[0] if single_image else tensor
         return tensor.detach().cpu().numpy()
+
+
+class SSLTransform:
+    """Wrapper around Albumentations' ReplayCompose, that allows to retrieve the transform
+    parameters after applying it.
+    """
+
+    def __init__(self, transform: alb.ReplayCompose, track_params: Dict[int, str]) -> None:
+        self.track_params = track_params
+        self.transform = transform
+
+    def __call__(self, *args, force_apply=False, **data) -> Any:
+        data = self.transform(*args, force_apply=force_apply, **data)
+        image = data["image"]
+        info = data["replay"]["transforms"]
+        params = list()
+        # iterate target parameters, append what's available
+        for trf_index, param_name in self.track_params.items():
+            trf_params = info[trf_index].get("params")
+            if trf_params and param_name in trf_params:
+                params.append(trf_params[param_name])
+        return image, *params
 
 
 def adapt_channels(mean: tuple, std: tuple, in_channels: int = 3):
@@ -67,3 +93,9 @@ def test_transforms(in_channels: int = 3,
 
 def inverse_transform(mean: tuple = (0.485, 0.456, 0.406), std: tuple = (0.229, 0.224, 0.225)):
     return Denormalize(mean=mean, std=std)
+
+
+def ssl_transforms():
+    return SSLTransform(alb.ReplayCompose([alb.RandomRotate90(always_apply=True),
+                                           ToTensorV2()]),
+                        track_params={0: "factor"})
