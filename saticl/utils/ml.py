@@ -71,6 +71,15 @@ def compute_class_weights(data: Dict[Any, int], smoothing: float = 0.15, clip: f
     return {k: np.clip(round(float(majority / v), ndigits=2), 0, clip) for k, v in data.items()}
 
 
+def load_class_weights(weights_path: Path) -> torch.Tensor:
+    # load class weights, if any
+    if weights_path is None or not weights_path.exists() or not weights_path.is_file():
+        raise ValueError(f"Path '{str(weights_path)}' does not exist or it's not a numpy array")
+
+    weights = np.load(weights_path).astype(np.float32)
+    return torch.from_numpy(weights)
+
+
 def one_hot(target: torch.Tensor, num_classes: Optional[int] = None) -> torch.Tensor:
     """source: https://github.com/PhoenixDL/rising. Computes one-hot encoding of input tensor.
     Args:

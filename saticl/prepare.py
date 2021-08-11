@@ -5,7 +5,7 @@ from typing import Dict, Tuple
 import torch
 from torch import nn
 
-from saticl.config import Configuration, Metrics, SSLConfiguration
+from saticl.config import Configuration, Metrics, ModelConfig, SSLConfiguration
 from saticl.datasets import create_dataset
 from saticl.datasets.icl import ICLDataset
 from saticl.datasets.transforms import test_transforms, train_transforms
@@ -25,7 +25,10 @@ LOG = get_logger(__name__)
 def prepare_dataset(config: Configuration) -> ICLDataset:
     # instantiate transforms for training and evaluation
     data_root = Path(config.data_root)
-    train_transform = train_transforms(image_size=config.image_size, in_channels=config.in_channels)
+    train_transform = train_transforms(image_size=config.image_size,
+                                       in_channels=config.in_channels,
+                                       channel_transforms=config.channel_drop,
+                                       modality_transforms=config.modality_drop)
     eval_transform = test_transforms(in_channels=config.in_channels)
     LOG.debug("Train transforms: %s", str(train_transform))
     LOG.debug("Eval. transforms: %s", str(eval_transform))
@@ -58,17 +61,51 @@ def prepare_dataset(config: Configuration) -> ICLDataset:
     return train_dataset, val_dataset
 
 
+def create_multi_encoder(name_rgb: str, name_ir: str, config: ModelConfig) -> MultiEncoder:
+    encoder_a = create_encoder(name=name_rgb,
+                               decoder=config.decoder,
+                               pretrained=config.pretrained,
+                               freeze=config.freeze,
+                               output_stride=config.output_stride,
+                               act_layer=config.act,
+                               norm_layer=config.norm,
+                               channels=3)
+    encoder_b = create_encoder(name=name_ir,
+                               decoder=config.decoder,
+                               pretrained=config.pretrained,
+                               freeze=config.freeze,
+                               output_stride=config.output_stride,
+                               act_layer=config.act,
+                               norm_layer=config.norm,
+                               channels=1)
+    return MultiEncoder(encoder_a, encoder_b, act_layer=config.act, norm_layer=config.norm)
+
+
 def prepare_model(config: Configuration, task: Task) -> nn.Module:
     cfg = config.model
-    encoder = create_encoder(name=cfg.encoder,
-                             decoder=cfg.decoder,
-                             pretrained=cfg.pretrained,
-                             freeze=cfg.freeze,
-                             output_stride=cfg.output_stride,
+    # instead of creating a new var, encoder is exploited for different purposes
+    # we expect a single encoder name, or a comma-separated list of names, one for RGB and one for IR
+    # e.g. valid examples: 'tresnet_m' - 'resnet34,resnet34'
+    enc_names = cfg.encoder.split(",")
+    if len(enc_names) == 1:
+        encoder = create_encoder(name=enc_names[0],
+                                 decoder=cfg.decoder,
+                                 pretrained=cfg.pretrained,
+                                 freeze=cfg.freeze,
+                                 output_stride=cfg.output_stride,
+                                 act_layer=cfg.act,
+                                 norm_layer=cfg.norm,
+                                 channels=config.in_channels)
+    elif len(enc_names) == 2:
+        encoder = create_multi_encoder(name_rgb=enc_names[0], name_ir=enc_names[1], config=cfg)
+    else:
+        NotImplementedError(f"The provided list of encoders is not supported: {cfg.encoder}")
+    # create decoder: always uses the RGB encoder as reference
+    # SSMA blocks in the multiencoder merge the features into a number of channels equal to RGB for each layer.
+    decoder = create_decoder(name=cfg.decoder,
+                             feature_info=encoder.feature_info,
                              act_layer=cfg.act,
-                             norm_layer=cfg.norm,
-                             channels=config.in_channels)
-    decoder = create_decoder(name=cfg.decoder, feature_info=encoder.feature_info, act_layer=cfg.act, norm_layer=cfg.norm)
+                             norm_layer=cfg.norm)
     # extract intermediate features when encoder KD is required
     extract_features = config.kd.encoder_factor > 0
     icl_model = ICLSegmenter(encoder, decoder, classes=task.num_classes_per_task(), return_features=extract_features)
@@ -77,29 +114,13 @@ def prepare_model(config: Configuration, task: Task) -> nn.Module:
 
 def prepare_model_ssl(config: SSLConfiguration, task: Task) -> Tuple[nn.Module, nn.Module]:
     cfg = config.model
-    encoder_a = create_encoder(name=cfg.encoder,
-                               decoder=cfg.decoder,
-                               pretrained=cfg.pretrained,
-                               freeze=cfg.freeze,
-                               output_stride=cfg.output_stride,
-                               act_layer=cfg.act,
-                               norm_layer=cfg.norm,
-                               channels=3)
-    encoder_b = create_encoder(name=cfg.encoder_ir,
-                               decoder=cfg.decoder,
-                               pretrained=cfg.pretrained,
-                               freeze=cfg.freeze,
-                               output_stride=cfg.output_stride,
-                               act_layer=cfg.act,
-                               norm_layer=cfg.norm,
-                               channels=1)
-    encoder = MultiEncoder(encoder_a, encoder_b, act_layer=cfg.act, norm_layer=cfg.norm)
+    encoder = create_multi_encoder(name_rgb=cfg.encoder, name_ir=cfg.encoder_ir, config=cfg)
     decoder = create_decoder(name=cfg.decoder, feature_info=encoder.feature_info, act_layer=cfg.act, norm_layer=cfg.norm)
     # extract intermediate features when encoder KD is required
     extract_features = config.kd.encoder_factor > 0
     icl_model = ICLSegmenter(encoder, decoder, classes=task.num_classes_per_task(), return_features=extract_features)
     # create also a classifier for the pretext class, using the same encoders
-    ssl_model = PretextClassifier(encoder_a, encoder_b,
+    ssl_model = PretextClassifier(encoder.encoder_rgb, encoder.encoder_ir,
                                   act_layer=cfg.act,
                                   norm_layer=cfg.norm,
                                   num_classes=cfg.pretext_classes)

@@ -1,3 +1,5 @@
+from typing import Union
+
 import torch
 from torch import nn
 from torch.nn import functional as func
@@ -8,15 +10,20 @@ from saticl.utils.ml import one_hot_batch
 
 class FocalLoss(nn.Module):
 
-    def __init__(self, alpha=1, gamma=2, size_average=True, ignore_index=255):
+    def __init__(self, alpha=1, gamma=2, size_average=True, ignore_index=255, weight: torch.Tensor = None):
         super(FocalLoss, self).__init__()
         self.alpha = alpha
         self.gamma = gamma
         self.ignore_index = ignore_index
         self.size_average = size_average
+        self.weight = weight
 
     def forward(self, inputs, targets):
-        ce_loss = func.cross_entropy(inputs, targets, reduction='none', ignore_index=self.ignore_index)
+        ce_loss = func.cross_entropy(inputs,
+                                     targets,
+                                     reduction='none',
+                                     ignore_index=self.ignore_index,
+                                     weight=self.weight)
         pt = torch.exp(-ce_loss)
         focal_loss = self.alpha * (1 - pt)**self.gamma * ce_loss
         return focal_loss.mean() if self.size_average else focal_loss.sum()
@@ -31,12 +38,12 @@ class FocalTverskyLoss(nn.Module):
                  beta: float = 0.4,
                  gamma: float = 2.0,
                  ignore_index: int = 255,
-                 weights: float = 1.0):
+                 weight: Union[float, torch.Tensor] = None):
         super().__init__()
         self.alpha = alpha
         self.beta = beta
         self.gamma = gamma
-        self.weights = weights
+        self.weight = weight if weight is not None else 1.0
         self.ignore_index = ignore_index
 
     def forward(self, preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
@@ -51,7 +58,55 @@ class FocalTverskyLoss(nn.Module):
         fp = (probs * (1 - onehot)).sum(dim=dims)
         fn = ((1 - probs) * onehot).sum(dim=dims)
 
-        index = self.weights * (tp / (tp + self.alpha * fp + self.beta * fn))
+        index = self.weight * (tp / (tp + self.alpha * fp + self.beta * fn))
+        return (1 - index.mean())**self.gamma
+
+
+class UnbiasedFTLoss(nn.Module):
+    """Custom implementation
+    """
+
+    def __init__(self,
+                 old_class_count: int,
+                 alpha: float = 0.6,
+                 beta: float = 0.4,
+                 gamma: float = 2.0,
+                 ignore_index: int = 255,
+                 weight: Union[float, torch.Tensor] = None):
+        super().__init__()
+        self.old_class_count = old_class_count
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
+        self.weight = weight if weight is not None else 1.0
+        self.ignore_index = ignore_index
+
+    def forward(self, preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        oc = self.old_class_count
+        num_classes = preds.size(1)
+        # just make sure we are not considering any of the old classes, labels is [batch, h, w]
+        # compute the one-hot encoded ground truth, excluding old labels
+        labels = targets.clone()
+        labels[targets < oc] = 0
+        onehot = one_hot_batch(labels, num_classes=num_classes, ignore_index=self.ignore_index)
+        onehot = onehot.float().to(preds.device)
+
+        # compute the softmax (using log for numerical stability)
+        # denominator becomes log(sum_i^N(exp(x_i)))
+        # numerator becomes x_j - denominator
+        # unbiased setting: p(0) = sum(p(old classes)) -> p of having an old class or background
+        probs = torch.zeros_like(preds)
+        denominator = torch.logsumexp(preds, dim=1)
+        probs[:, 0] = torch.logsumexp(preds[:, :oc], dim=1) - denominator    # [batch, h, w] p(O)
+        probs[:, oc:] = preds[:, oc:] - denominator.unsqueeze(dim=1)    # [batch, new, h, w] p(new_i)
+        probs = torch.exp(probs)
+        # sum over batch, height width, leave classes (dim 1) to compute TP, FP, FN
+        dims = (0, 2, 3)
+        tp = (onehot * probs).sum(dim=dims)
+        fp = (probs * (1 - onehot)).sum(dim=dims)
+        fn = ((1 - probs) * onehot).sum(dim=dims)
+
+        index = self.weight * (tp / (tp + self.alpha * fp + self.beta * fn))
         return (1 - index.mean())**self.gamma
 
 
@@ -71,11 +126,16 @@ class CombinedLoss(nn.Module):
 
 class UnbiasedCrossEntropy(nn.Module):
 
-    def __init__(self, old_class_count: int, reduction: str = "mean", ignore_index: int = 255):
+    def __init__(self,
+                 old_class_count: int,
+                 reduction: str = "mean",
+                 ignore_index: int = 255,
+                 weight: torch.Tensor = None):
         super().__init__()
         self.reduction = reduction
         self.ignore_index = ignore_index
         self.old_class_count = old_class_count
+        self.weight = weight
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
 
@@ -90,7 +150,11 @@ class UnbiasedCrossEntropy(nn.Module):
 
         labels = targets.clone()    # B, H, W
         labels[targets < oc] = 0    # just make sure we are not considering any of the old classes
-        loss = func.nll_loss(outputs, labels, ignore_index=self.ignore_index, reduction=self.reduction)
+        loss = func.nll_loss(outputs,
+                             labels,
+                             ignore_index=self.ignore_index,
+                             reduction=self.reduction,
+                             weight=self.weight)
         return loss
 
 
@@ -101,13 +165,15 @@ class UnbiasedFocalLoss(nn.Module):
                  reduction: str = "mean",
                  ignore_index: int = 255,
                  alpha: float = 1.0,
-                 gamma: float = 2.0):
+                 gamma: float = 2.0,
+                 weight: torch.Tensor = None):
         super().__init__()
         self.reduction = reduction
         self.ignore_index = ignore_index
         self.old_class_count = old_class_count
         self.alpha = alpha
         self.gamma = gamma
+        self.weight = weight
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         oc = self.old_class_count
@@ -121,7 +187,7 @@ class UnbiasedFocalLoss(nn.Module):
 
         labels = targets.clone()    # B, H, W
         labels[targets < oc] = 0    # just make sure we are not considering any of the old classes
-        ce = func.nll_loss(outputs, labels, ignore_index=self.ignore_index, reduction="none")
+        ce = func.nll_loss(outputs, labels, ignore_index=self.ignore_index, reduction="none", weight=self.weight)
         loss = self.alpha * (1 - torch.exp(-ce))**self.gamma * ce
         return loss
 

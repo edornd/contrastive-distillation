@@ -14,6 +14,7 @@ from saticl.losses import (
     KDLoss,
     UnbiasedCrossEntropy,
     UnbiasedFocalLoss,
+    UnbiasedFTLoss,
     UnbiasedKDLoss,
 )
 from saticl.metrics import F1Score, IoU, Precision, Recall
@@ -121,17 +122,34 @@ class CEConfig(ObjectSettings):
     unbiased: bool = Field(False, description="Enables unbiased main loss")
     focal: bool = Field(False, description="Enables focal loss variant")
     tversky: bool = Field(False, description="Enables a generalized Dice loss")
+    alpha: float = Field(0.6, description="Alpha param. for Tversky loss (0.5 for Dice)")
+    beta: float = Field(0.4, description="Beta param. for Tversky loss (0.5 foor Dice)")
+    gamma: float = Field(2.0, description="Gamma param. for focal loss (1.0 for standard CE)")
 
     def instantiate(self, *args, **kwargs) -> Any:
         assert "ignore_index" in kwargs, "Ignore index required"
         assert "old_class_count" in kwargs, "Number of old classes is required for the unbiased setting"
         # unbiased loss is only useful from step 1 onwards
         if self.unbiased and kwargs.get("old_class_count") > 0:
-            loss_class = UnbiasedFocalLoss if self.focal else UnbiasedCrossEntropy
+            if self.focal:
+                kwargs.update(gamma=self.gamma)
+                loss_class = UnbiasedFocalLoss
+            elif self.tversky:
+                kwargs.update(alpha=self.alpha, beta=self.beta, gamma=self.gamma)
+                loss_class = UnbiasedFTLoss
+            else:
+                loss_class = UnbiasedCrossEntropy
             return loss_class(*args, **kwargs)
         else:
             kwargs.pop("old_class_count")
-            loss_class = FocalLoss if self.focal else CrossEntropyLoss
+            if self.focal:
+                kwargs.update(gamma=self.gamma)
+                loss_class = FocalLoss
+            elif self.tversky:
+                kwargs.update(alpha=self.alpha, beta=self.beta, gamma=self.gamma)
+                loss_class = FocalTverskyLoss
+            else:
+                loss_class = CrossEntropyLoss
             return loss_class(*args, **kwargs)
 
 
@@ -169,6 +187,9 @@ class Configuration(BaseSettings):
     seed: int = Field(1337, description="Random seed for deterministic runs")
     image_size: int = Field(512, description="Size of the input images")
     in_channels: int = Field(3, description="How many input channels, 3 for RGB, 4 for RGBIR")
+    channel_drop: bool = Field(False, description="Whether to apply channel dropout")
+    modality_drop: bool = Field(False, description="Whether to apply modality dropout (drop entire RGB or IR)")
+    class_weights: str = Field(None, description="Optional path to a class weight array (npy format)")
     trainer: TrainerConfig = TrainerConfig()
     # dataset options
     data_root: str = Field(required=True, description="Path to the dataset")
@@ -213,3 +234,5 @@ class SSLConfiguration(Configuration):
 class TestConfiguration(Configuration):
     data_root: str = Field(None, description="Path to the dataset")
     store_predictions: bool = Field(False, description="Whether to store predicted images or not")
+    test_on_val: bool = Field(False, description="""Sometimes datasets do not share the GT for the test set:
+                                                 if you want to run a test against the validation set, set this to true""")

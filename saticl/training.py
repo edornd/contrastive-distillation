@@ -126,7 +126,13 @@ def train(config: Configuration):
     optimizer = config.optimizer.instantiate(new_model.parameters())
     scheduler = config.scheduler.instantiate(optimizer)
     # prepare losses
-    segment_loss = config.ce.instantiate(ignore_index=255, old_class_count=task.old_class_count())
+    weights = None
+    if config.class_weights:
+        weights = train_set.load_class_weights(Path(config.class_weights),
+                                               device=accelerator.device,
+                                               normalize=config.ce.tversky)
+        LOG.info("Using class weights: %s", str(weights))
+    segment_loss = config.ce.instantiate(ignore_index=255, old_class_count=task.old_class_count(), weight=weights)
     distill_loss = config.kd.instantiate()
     if task.step > 0 and config.ce.unbiased:
         seg_loss_name = str(type(segment_loss))

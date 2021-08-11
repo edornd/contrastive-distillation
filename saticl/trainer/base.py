@@ -361,7 +361,11 @@ class Trainer:
         self._update_metrics(y_true=y_true, y_pred=y_pred, stage=TrainerStage.test)
         return loss, (images.cpu(), y_true.cpu(), torch.argmax(y_pred, dim=1).cpu())
 
-    def predict(self, test_dataloader: DataLoader, metrics: Dict[str, Metric], logger_exclude: Iterable[str] = None):
+    def predict(self,
+                test_dataloader: DataLoader,
+                metrics: Dict[str, Metric],
+                logger_exclude: Iterable[str] = None,
+                return_preds: bool = False):
         logger_exclude = logger_exclude or []
         self.metrics[TrainerStage.test.value] = metrics
         self._reset_metrics(stage=TrainerStage.test)
@@ -381,7 +385,8 @@ class Trainer:
                 # we do not log 'iter' versions, as for validation
                 losses.append(loss_value)
                 timings.append(elapsed)
-                results.append(data)
+                if return_preds:
+                    results.append(data)
 
             self.logger.log_scalar("test/loss", np.mean(losses))
             self.logger.log_scalar("test/time", np.mean(timings))

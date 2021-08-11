@@ -158,3 +158,66 @@ def test_dataset_potsdam_icl_step2(potsdam_path: Path):
         # labels = np.unique(mask.numpy())
         # LOG.info(str(labels))
         assert torch.all(sum(mask == i for i in (0, 5, 6)).bool())
+
+
+def test_dataset_potsdam_icl_step0_weights(potsdam_path: Path, potsdam_weights: Path):
+    # instantiate transforms for training
+    seed_everything(1337)
+    train_transform = test_transforms(in_channels=4)
+    # create the train dataset, then split or create the ad hoc validation set
+    train_dataset = create_dataset("potsdam", path=potsdam_path, subset="train", transform=train_transform, channels=4)
+    original_length = len(train_dataset)
+
+    task = Task(dataset="potsdam", name="321", step=0)
+    icl_set = ICLDataset(train_dataset, task, overlap=True)
+    # check it includes the previously missing background + handpicked check
+    assert len(icl_set.categories()) == 7
+    assert icl_set.categories()[1] == "impervious_surfaces"
+    assert len(icl_set) < original_length
+    # load weights
+    weights = icl_set.load_class_weights(potsdam_weights)
+    assert len(weights) == 4
+    LOG.info("Weights: %s", weights)
+    LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, normalize=True))
+
+
+def test_dataset_potsdam_icl_step1_weights(potsdam_path: Path, potsdam_weights: Path):
+    # instantiate transforms for training
+    seed_everything(1337)
+    train_transform = test_transforms(in_channels=4)
+    # create the train dataset, then split or create the ad hoc validation set
+    train_dataset = create_dataset("potsdam", path=potsdam_path, subset="train", transform=train_transform, channels=4)
+    original_length = len(train_dataset)
+
+    task = Task(dataset="potsdam", name="321", step=1)
+    icl_set = ICLDataset(train_dataset, task, overlap=True)
+    # check it includes the previously missing background + handpicked check
+    assert len(icl_set.categories()) == 7
+    assert icl_set.categories()[1] == "impervious_surfaces"
+    assert len(icl_set) < original_length
+    # load weights
+    weights = icl_set.load_class_weights(potsdam_weights)
+    assert len(weights) == 6
+    LOG.info("Weights: %s", weights)
+    LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, normalize=True))
+
+
+def test_dataset_potsdam_icl_step2_weights(potsdam_path: Path, potsdam_weights: Path):
+    # instantiate transforms for training
+    seed_everything(1337)
+    train_transform = test_transforms(in_channels=4)
+    # create the train dataset, then split or create the ad hoc validation set
+    train_dataset = create_dataset("potsdam", path=potsdam_path, subset="train", transform=train_transform, channels=4)
+    original_length = len(train_dataset)
+
+    task = Task(dataset="potsdam", name="321", step=2)
+    icl_set = ICLDataset(train_dataset, task, overlap=True)
+    # check it includes the previously missing background + handpicked check
+    assert len(icl_set.categories()) == 7
+    assert icl_set.categories()[1] == "impervious_surfaces"
+    assert len(icl_set) < original_length
+    # load weights
+    weights = icl_set.load_class_weights(potsdam_weights)
+    assert len(weights) == 7
+    LOG.info("Weights: %s", weights)
+    LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, normalize=True))

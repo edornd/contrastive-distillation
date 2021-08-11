@@ -1,8 +1,10 @@
+import random
 from typing import Any, Dict, Iterable
 
 import torch
 
 import albumentations as alb
+from albumentations import functional as func
 from albumentations.pytorch import ToTensorV2
 
 
@@ -55,6 +57,51 @@ class SSLTransform:
         return image, *params
 
 
+class ModalityDropout(alb.ImageOnlyTransform):
+    """Randomly Drop RGB or IR in the input Image.
+
+    Args:
+        fill_value (int, float): pixel value for the dropped channel.
+        p (float): probability of applying the transform. Default: 0.5.
+
+    Targets:
+        image
+
+    Image types:
+        uint8, uint16, unit32, float32
+    """
+
+    def __init__(self,
+                 rgb_channels: tuple = (0, 1, 2),
+                 ir_channel: int = 3,
+                 fill_value: int = 0,
+                 always_apply: bool = False,
+                 p: float = 0.5):
+        super().__init__(always_apply, p)
+        self.rgb_channels = rgb_channels
+        self.ir_channel = (ir_channel,)
+        self.fill_value = fill_value
+
+    def apply(self, img, channels_to_drop=(0,), **params):
+        return func.channel_dropout(img, channels_to_drop, self.fill_value)
+
+    def get_params_dependent_on_targets(self, params):
+        img = params["image"]
+        num_channels = img.shape[-1]
+        if len(img.shape) == 2 or num_channels != 4:
+            raise NotImplementedError("Images has one channel, mod. dropout requires 4")
+        which_modality = random.randint(0, 1)
+        channels_to_drop = self.rgb_channels if which_modality else self.ir_channel
+        return {"channels_to_drop": channels_to_drop}
+
+    def get_transform_init_args_names(self):
+        return ("rgb_channels", "ir_channel", "fill_value")
+
+    @property
+    def targets_as_params(self):
+        return ["image"]
+
+
 def adapt_channels(mean: tuple, std: tuple, in_channels: int = 3):
     assert mean is not None and std is not None, "Non-null means and stds required"
     if in_channels > len(mean):
@@ -66,22 +113,27 @@ def adapt_channels(mean: tuple, std: tuple, in_channels: int = 3):
 def train_transforms(image_size: int,
                      in_channels: int,
                      mean: tuple = (0.485, 0.456, 0.406),
-                     std: tuple = (0.229, 0.224, 0.225)):
+                     std: tuple = (0.229, 0.224, 0.225),
+                     channel_transforms: bool = False,
+                     modality_transforms: bool = False):
     # alb.ChannelDropout(p=0.5, fill_value=0),
     # if input channels are 4 and mean and std are for RGB only, copy red for IR
     mean, std = adapt_channels(mean, std, in_channels=in_channels)
     min_crop = image_size // 4 * 3
     max_crop = image_size
-    return alb.Compose([
+    transforms = [
         alb.RandomSizedCrop(min_max_height=(min_crop, max_crop), height=image_size, width=image_size, p=0.8),
         alb.Flip(p=0.5),
         alb.RandomRotate90(p=0.5),
-        alb.OneOf([alb.GaussNoise(var_limit=(20, 60), p=0.5),
-                   alb.Blur(blur_limit=(3, 5), p=0.5)]),
+        alb.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.5, rotate_limit=90, p=0.5),
         alb.RandomBrightnessContrast(p=0.8),
-        alb.Normalize(mean=mean, std=std),
-        ToTensorV2()
-    ])
+    ]
+    if channel_transforms:
+        transforms.append(alb.ChannelDropout(p=0.5))
+    if modality_transforms:
+        transforms.append(ModalityDropout(p=0.25))
+    transforms.extend([alb.Normalize(mean=mean, std=std), ToTensorV2()])
+    return alb.Compose(transforms)
 
 
 def test_transforms(in_channels: int = 3,

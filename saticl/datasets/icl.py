@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from pathlib import Path
 from typing import Dict, List
 
 import torch
@@ -7,6 +8,7 @@ from ordered_set import OrderedSet
 from saticl.datasets.base import DatasetBase
 from saticl.tasks import Task
 from saticl.utils.common import get_logger
+from saticl.utils.ml import load_class_weights
 
 LOG = get_logger(__name__)
 
@@ -36,7 +38,7 @@ class ICLDataset(DatasetBase):
         # safe to proceed
         self.overlap = overlap
         self.mask_value = mask_value
-        self.has_background = dataset.has_background()
+        self._has_background = dataset.has_background()
         self.dataset.add_mask(task.filter_images(dataset, overlap=overlap))
         # prepare lookup tables to transform from normal -> ICL indices
         # first shift labels if the background is not already included and set 0 as first
@@ -55,8 +57,21 @@ class ICLDataset(DatasetBase):
             substitute = self.label2index.get(key, mask_value) if key in available else mask_value
             self.label_transform[key] = substitute
 
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index: int) -> torch.Tensor:
+        image, label = self.dataset[index]
+        # increment (valid) indices by 1 to account for background at 0
+        if not self._has_background:
+            label[label != self.ignore_index()] += 1
+        # use the lookup dictionary for indexing
+        if self.label_transform is not None:
+            label.apply_(lambda x: self.label_transform[x])
+        return image, label.long()
+
     def _process_labels(self, labels: OrderedSet) -> OrderedSet:
-        shift = 0 if self.has_background else 1
+        shift = 0 if self._has_background else 1
         tmp = OrderedSet([x + shift for x in labels])
         # move any background in the wrong place to index 0
         tmp.discard(0)
@@ -89,15 +104,16 @@ class ICLDataset(DatasetBase):
     def has_background(self) -> bool:
         return True
 
-    def __len__(self):
-        return len(self.dataset)
-
-    def __getitem__(self, index: int) -> torch.Tensor:
-        image, label = self.dataset[index]
-        # increment (valid) indices by 1 to account for background at 0
-        if not self.has_background:
-            label[label != self.ignore_index()] += 1
-        # use the lookup dictionary for indexing
-        if self.label_transform is not None:
-            label.apply_(lambda x: self.label_transform[x])
-        return image, label.long()
+    def load_class_weights(self, weights_path: Path, device: torch.device, normalize: bool = False) -> torch.Tensor:
+        if not weights_path:
+            return None
+        # load the weights for the standard classes, add background if not included (min. weight)
+        weights = load_class_weights(weights_path=weights_path)
+        if not self._has_background:
+            weights = torch.cat((weights.min().view(1), weights))
+        # this are the standard class weights, we need to remap them
+        labels = self.old_labels.union(self.new_labels)
+        remapped = torch.tensor([weights[l] for l in labels])
+        if normalize:
+            remapped /= remapped.max()
+        return remapped.to(device)

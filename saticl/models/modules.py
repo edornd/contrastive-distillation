@@ -199,7 +199,7 @@ class SSMA(nn.Module):
         self.bottleneck = nn.Sequential(nn.Conv2d(total_chs, bottleneck_chs, kernel_size=3, padding=1, bias=False),
                                         norm_layer(bottleneck_chs), act_layer(),
                                         nn.Conv2d(bottleneck_chs, total_chs, kernel_size=3, padding=1, bias=False),
-                                        nn.Sigmoid())
+                                        norm_layer(total_chs), act_layer())
         # the output is given by the RGB network, which is supposed to be bigger
         # also, this allows for easier integration with decoders
         self.out_bn = norm_layer(total_chs)

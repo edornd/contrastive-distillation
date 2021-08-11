@@ -50,13 +50,14 @@ def test(test_config: TestConfiguration):
     LOG.info("Using seed: %d", config.seed)
     seed_everything(config.seed)
     # prepare datasets
-    LOG.info("Loading test dataset...")
+    subset = "valid" if test_config.test_on_val else "test"
+    LOG.info("Loading %s dataset...", subset)
     eval_transform = test_transforms(in_channels=config.in_channels)
     LOG.debug("Eval. transforms: %s", str(eval_transform))
     # create the train dataset, then split or create the ad hoc validation set
     test_dataset = create_dataset(config.dataset,
                                   path=Path(config.data_root),
-                                  subset="test",
+                                  subset=subset,
                                   transform=eval_transform,
                                   channels=config.in_channels)
     add_background = not test_dataset.has_background()
@@ -81,7 +82,13 @@ def test(test_config: TestConfiguration):
     LOG.info("Model restored from: %s", str(ckpt_path))
 
     # prepare losses
-    segment_loss = config.ce.instantiate(ignore_index=255, old_class_count=task.old_class_count())
+    weights = None
+    if config.class_weights:
+        weights = test_set.load_class_weights(Path(config.class_weights),
+                                              device=accelerator.device,
+                                              normalize=config.ce.tversky)
+        LOG.info("Using class weights: %s", str(weights))
+    segment_loss = config.ce.instantiate(ignore_index=255, old_class_count=task.old_class_count(), weight=weights)
     distill_loss = config.kd.instantiate()
     # prepare metrics and logger
     logger = TensorBoardLogger(log_folder=logs_folder,
@@ -117,7 +124,10 @@ def test(test_config: TestConfiguration):
     _, eval_metrics = prepare_metrics(task=task, device=accelerator.device)
     eval_metrics.update(dict(conf_mat=ConfusionMatrix(num_classes=num_classes, device=accelerator.device)))
     # execute predict
-    losses, data = trainer.predict(test_dataloader=test_loader, metrics=eval_metrics, logger_exclude=["conf_mat"])
+    losses, data = trainer.predict(test_dataloader=test_loader,
+                                   metrics=eval_metrics,
+                                   logger_exclude=["conf_mat"],
+                                   return_preds=test_config.store_predictions)
     scores = trainer.current_scores["test"]
     # logging stuff to file and storing images if required
     LOG.info("Testing completed, average loss: %.4f", np.mean(losses))
@@ -178,13 +188,14 @@ def test_ssl(test_config: TestConfiguration):
     LOG.info("Using seed: %d", config.seed)
     seed_everything(config.seed)
     # prepare datasets
-    LOG.info("Loading test dataset...")
+    subset = "valid" if test_config.test_on_val else "test"
+    LOG.info("Loading %s dataset...", subset)
     eval_transform = test_transforms(in_channels=config.in_channels)
     LOG.debug("Eval. transforms: %s", str(eval_transform))
     # create the train dataset, then split or create the ad hoc validation set
     test_dataset = create_dataset(config.dataset,
                                   path=Path(config.data_root),
-                                  subset="test",
+                                  subset=subset,
                                   transform=eval_transform,
                                   channels=config.in_channels)
     add_background = not test_dataset.has_background()
@@ -209,7 +220,13 @@ def test_ssl(test_config: TestConfiguration):
     LOG.info("Model restored from: %s", str(ckpt_path))
 
     # prepare losses
-    segment_loss = config.ce.instantiate(ignore_index=255, old_class_count=task.old_class_count())
+    weights = None
+    if config.class_weights:
+        weights = test_set.load_class_weights(Path(config.class_weights),
+                                              device=accelerator.device,
+                                              normalize=config.ce.tversky)
+        LOG.info("Using class weights: %s", str(weights))
+    segment_loss = config.ce.instantiate(ignore_index=255, old_class_count=task.old_class_count(), weight=weights)
     distill_loss = config.kd.instantiate()
     # prepare metrics and logger
     logger = TensorBoardLogger(log_folder=logs_folder,

@@ -1,6 +1,7 @@
 import os
-import pytest
 from pathlib import Path
+
+import pytest
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,3 +16,8 @@ def get_env(name: str) -> str:
 @pytest.fixture(scope="session")
 def potsdam_path():
     return Path(get_env("DATA_ROOT_POTSDAM"))
+
+
+@pytest.fixture(scope="session")
+def potsdam_weights():
+    return Path(get_env("WEIGHTS_PATH_POTSDAM"))
