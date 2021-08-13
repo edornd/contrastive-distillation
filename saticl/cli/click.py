@@ -115,8 +115,11 @@ def get_multiple(type_: type) -> bool:
     if is_mapping(type_):
         return False
     # early out for enums
-    if isinstance(type_, Enum) or issubclass(type_, Enum):
-        return False
+    try:
+        if isinstance(type_, Enum) or issubclass(type_, Enum):
+            return False
+    except TypeError:
+        pass
     # For containers, we allow multiple arguments. This way, the user
     # can specify an option multiple times and click gathers all values
     # into a single container. E.g.:

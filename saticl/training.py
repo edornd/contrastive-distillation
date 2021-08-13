@@ -8,14 +8,16 @@ from torch.utils.data import DataLoader
 
 from saticl.config import Configuration, SSLConfiguration
 from saticl.datasets.icl import ICLDataset
-from saticl.datasets.ssl import SSLDataset
-from saticl.datasets.transforms import inverse_transform, ssl_transforms
+from saticl.datasets.transforms import geom_transforms, inverse_transform, ssl_transforms
+from saticl.datasets.wrappers import RotationDataset, SSLDataset
 from saticl.logging.tensorboard import TensorBoardLogger
+from saticl.losses.regularization import AugmentationInvariance
 from saticl.models.icl import ICLSegmenter
 from saticl.prepare import prepare_dataset, prepare_metrics, prepare_metrics_ssl, prepare_model, prepare_model_ssl
 from saticl.tasks import Task
 from saticl.trainer.base import Trainer
 from saticl.trainer.callbacks import Checkpoint, DisplaySamples, EarlyStopping, EarlyStoppingCriterion
+from saticl.trainer.invariance import AugInvarianceTrainer
 from saticl.trainer.ssl import SSLStage, SSLTrainer
 from saticl.utils.common import flatten_config, get_logger, store_config
 from saticl.utils.ml import checkpoint_path, init_experiment, seed_everything, seed_worker
@@ -93,6 +95,9 @@ def train(config: Configuration):
     train_mask, valid_mask = 0, 255
     train_set = ICLDataset(dataset=train_set, task=task, mask_value=train_mask, overlap=config.task.overlap)
     valid_set = ICLDataset(dataset=valid_set, task=task, mask_value=valid_mask, overlap=config.task.overlap)
+    if config.ce.aug_factor > 0:
+        LOG.info("Wrapping into rotation-augmented dataset")
+        train_set = RotationDataset(train_set, transform=geom_transforms())
     train_loader = DataLoader(dataset=train_set,
                               batch_size=config.trainer.batch_size,
                               shuffle=True,
@@ -153,24 +158,31 @@ def train(config: Configuration):
     # prepare trainer
     LOG.info("Visualize: %s, num. batches for visualization: %s", str(config.visualize), str(config.num_samples))
     num_samples = int(config.visualize) * config.num_samples
-    trainer = Trainer(accelerator=accelerator,
-                      task=task,
-                      new_model=new_model,
-                      old_model=old_model,
-                      optimizer=optimizer,
-                      scheduler=scheduler,
-                      train_metrics=train_metrics,
-                      val_metrics=valid_metrics,
-                      old_classes=train_set.old_categories(),
-                      new_classes=train_set.new_categories(),
-                      seg_criterion=segment_loss,
-                      kdd_criterion=distill_loss,
-                      kde_criterion=None,
-                      kdd_lambda=config.kd.decoder_factor,
-                      kde_lambda=config.kd.encoder_factor,
-                      logger=logger,
-                      samples=num_samples,
-                      debug=config.debug)
+    # choose trainer class depending on task or regularization
+    trainer_class = Trainer
+    kwargs = dict()
+    if config.ce.aug_factor > 0:
+        kwargs.update(rot_criterion=AugmentationInvariance(), rot_lambda=config.ce.aug_factor)
+        trainer_class = AugInvarianceTrainer
+    trainer = trainer_class(accelerator=accelerator,
+                            task=task,
+                            new_model=new_model,
+                            old_model=old_model,
+                            optimizer=optimizer,
+                            scheduler=scheduler,
+                            train_metrics=train_metrics,
+                            val_metrics=valid_metrics,
+                            old_classes=train_set.old_categories(),
+                            new_classes=train_set.new_categories(),
+                            seg_criterion=segment_loss,
+                            kdd_criterion=distill_loss,
+                            kde_criterion=None,
+                            kdd_lambda=config.kd.decoder_factor,
+                            kde_lambda=config.kd.encoder_factor,
+                            logger=logger,
+                            samples=num_samples,
+                            debug=config.debug,
+                            **kwargs)
     trainer.add_callback(EarlyStopping(call_every=1, metric=monitored,
                                        criterion=EarlyStoppingCriterion.maximum,
                                        patience=config.trainer.patience)) \
@@ -221,7 +233,7 @@ def train_ssl(config: SSLConfiguration):
     # prepare datasets
     LOG.info("Loading datasets...")
     train_set, valid_set = prepare_dataset(config=config)
-    train_set = SSLDataset(train_set, ssl_transform=ssl_transforms())
+    train_set = SSLDataset(train_set, transform=ssl_transforms())
     LOG.info("Full sets - train set: %d samples, validation set: %d samples", len(train_set), len(valid_set))
 
     add_background = not train_set.has_background()

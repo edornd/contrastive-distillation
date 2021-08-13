@@ -27,8 +27,8 @@ def prepare_dataset(config: Configuration) -> ICLDataset:
     data_root = Path(config.data_root)
     train_transform = train_transforms(image_size=config.image_size,
                                        in_channels=config.in_channels,
-                                       channel_transforms=config.channel_drop,
-                                       modality_transforms=config.modality_drop)
+                                       channel_dropout=config.channel_drop,
+                                       modality_dropout=config.modality_drop)
     eval_transform = test_transforms(in_channels=config.in_channels)
     LOG.debug("Train transforms: %s", str(train_transform))
     LOG.debug("Eval. transforms: %s", str(eval_transform))
@@ -61,7 +61,7 @@ def prepare_dataset(config: Configuration) -> ICLDataset:
     return train_dataset, val_dataset
 
 
-def create_multi_encoder(name_rgb: str, name_ir: str, config: ModelConfig) -> MultiEncoder:
+def create_multi_encoder(name_rgb: str, name_ir: str, config: ModelConfig, **kwargs: dict) -> MultiEncoder:
     encoder_a = create_encoder(name=name_rgb,
                                decoder=config.decoder,
                                pretrained=config.pretrained,
@@ -78,7 +78,7 @@ def create_multi_encoder(name_rgb: str, name_ir: str, config: ModelConfig) -> Mu
                                act_layer=config.act,
                                norm_layer=config.norm,
                                channels=1)
-    return MultiEncoder(encoder_a, encoder_b, act_layer=config.act, norm_layer=config.norm)
+    return MultiEncoder(encoder_a, encoder_b, act_layer=config.act, norm_layer=config.norm, **kwargs)
 
 
 def prepare_model(config: Configuration, task: Task) -> nn.Module:
@@ -97,7 +97,10 @@ def prepare_model(config: Configuration, task: Task) -> nn.Module:
                                  norm_layer=cfg.norm,
                                  channels=config.in_channels)
     elif len(enc_names) == 2:
-        encoder = create_multi_encoder(name_rgb=enc_names[0], name_ir=enc_names[1], config=cfg)
+        encoder = create_multi_encoder(name_rgb=enc_names[0],
+                                       name_ir=enc_names[1],
+                                       config=cfg,
+                                       return_features=False)
     else:
         NotImplementedError(f"The provided list of encoders is not supported: {cfg.encoder}")
     # create decoder: always uses the RGB encoder as reference
@@ -107,7 +110,8 @@ def prepare_model(config: Configuration, task: Task) -> nn.Module:
                              act_layer=cfg.act,
                              norm_layer=cfg.norm)
     # extract intermediate features when encoder KD is required
-    extract_features = config.kd.encoder_factor > 0
+    extract_features = config.kd.encoder_factor > 0 or config.ce.aug_factor > 0
+    LOG.info("Returning intermediate features: %s", str(extract_features))
     icl_model = ICLSegmenter(encoder, decoder, classes=task.num_classes_per_task(), return_features=extract_features)
     return icl_model
 

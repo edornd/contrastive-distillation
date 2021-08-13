@@ -10,7 +10,6 @@ import numpy as np
 import torch
 from accelerate import Accelerator
 from torch import nn
-from torch.cuda.amp import GradScaler
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
@@ -67,7 +66,6 @@ class Trainer:
         self.kdd_lambda = kdd_lambda
         self.kde_lambda = kde_lambda
         # optimizer, scheduler and logger, scaler for AMP
-        self.scaler = GradScaler()
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.logger = logger or EmptyLogger()
@@ -192,16 +190,17 @@ class Trainer:
         x, y = batch
         # forward and loss on segmentation task
         with self.accelerator.autocast():
-            new_out, new_features = self.model(x)
+            new_out, _ = self.model(x)
             seg_loss = self.criterion(new_out, y)
-            # forward and loss on knowledge distillation task
+            # this only has effect from step 1 onwards
             kdd_loss = torch.tensor(0, device=seg_loss.device, dtype=seg_loss.dtype)
             if self.task.step > 0:
-                old_out, old_features = self.old_model(x)
+                old_out, _ = self.old_model(x)
                 kdd_loss = self.criterion_kdd(new_out, old_out)
             # sum up losses
             total = seg_loss + self.kdd_lambda * kdd_loss
         # gather and update metrics
+        # we group only the 'standard' images, not the rotated ones
         y_true = self.accelerator.gather(y)
         y_pred = self.accelerator.gather(new_out)
         self._update_metrics(y_true=y_true, y_pred=y_pred, stage=TrainerStage.train)

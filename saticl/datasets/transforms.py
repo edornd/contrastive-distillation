@@ -114,8 +114,8 @@ def train_transforms(image_size: int,
                      in_channels: int,
                      mean: tuple = (0.485, 0.456, 0.406),
                      std: tuple = (0.229, 0.224, 0.225),
-                     channel_transforms: bool = False,
-                     modality_transforms: bool = False):
+                     channel_dropout: float = 0.0,
+                     modality_dropout: float = 0.0):
     # alb.ChannelDropout(p=0.5, fill_value=0),
     # if input channels are 4 and mean and std are for RGB only, copy red for IR
     mean, std = adapt_channels(mean, std, in_channels=in_channels)
@@ -128,10 +128,10 @@ def train_transforms(image_size: int,
         alb.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.5, rotate_limit=90, p=0.5),
         alb.RandomBrightnessContrast(p=0.8),
     ]
-    if channel_transforms:
-        transforms.append(alb.ChannelDropout(p=0.5))
-    if modality_transforms:
-        transforms.append(ModalityDropout(p=0.25))
+    if channel_dropout > 0:
+        transforms.append(alb.ChannelDropout(p=channel_dropout))
+    if modality_dropout > 0:
+        transforms.append(ModalityDropout(p=modality_dropout))
     transforms.extend([alb.Normalize(mean=mean, std=std), ToTensorV2()])
     return alb.Compose(transforms)
 
@@ -145,6 +145,12 @@ def test_transforms(in_channels: int = 3,
 
 def inverse_transform(mean: tuple = (0.485, 0.456, 0.406), std: tuple = (0.229, 0.224, 0.225)):
     return Denormalize(mean=mean, std=std)
+
+
+def geom_transforms():
+    # we should not require a normalization since we are dealing with transformed arrays already
+    return alb.Compose([alb.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.5, rotate_limit=90, always_apply=True),
+                        ToTensorV2()])
 
 
 def ssl_transforms():

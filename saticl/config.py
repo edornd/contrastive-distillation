@@ -125,6 +125,7 @@ class CEConfig(ObjectSettings):
     alpha: float = Field(0.6, description="Alpha param. for Tversky loss (0.5 for Dice)")
     beta: float = Field(0.4, description="Beta param. for Tversky loss (0.5 foor Dice)")
     gamma: float = Field(2.0, description="Gamma param. for focal loss (1.0 for standard CE)")
+    aug_factor: float = Field(0.0, description="Multiplier for the augmentation invariance regularization")
 
     def instantiate(self, *args, **kwargs) -> Any:
         assert "ignore_index" in kwargs, "Ignore index required"
@@ -187,8 +188,8 @@ class Configuration(BaseSettings):
     seed: int = Field(1337, description="Random seed for deterministic runs")
     image_size: int = Field(512, description="Size of the input images")
     in_channels: int = Field(3, description="How many input channels, 3 for RGB, 4 for RGBIR")
-    channel_drop: bool = Field(False, description="Whether to apply channel dropout")
-    modality_drop: bool = Field(False, description="Whether to apply modality dropout (drop entire RGB or IR)")
+    channel_drop: float = Field(0.0, description="Probability to apply channel dropout")
+    modality_drop: float = Field(0.0, description="Probability to apply modality dropout (drop entire RGB or IR)")
     class_weights: str = Field(None, description="Optional path to a class weight array (npy format)")
     trainer: TrainerConfig = TrainerConfig()
     # dataset options
@@ -202,7 +203,7 @@ class Configuration(BaseSettings):
     scheduler: SchedulerConfig = SchedulerConfig()
     kd: KDConfig = KDConfig()
     ce: CEConfig = CEConfig()
-    # method options
+    # method options and regularizations
     task: TaskConfig = TaskConfig(name="")
     method: ICLMethods = Field(ICLMethods.MIB, description="Which incremental learning method to use"
                                                            "(WARNING: this overrides some other parameters)")

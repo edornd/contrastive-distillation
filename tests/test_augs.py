@@ -6,8 +6,8 @@ import albumentations as alb
 from albumentations.pytorch import ToTensorV2
 from matplotlib import pyplot as plt
 from saticl.datasets import create_dataset
-from saticl.datasets.ssl import SSLDataset
 from saticl.datasets.transforms import Denormalize, ModalityDropout, ssl_transforms, train_transforms
+from saticl.datasets.wrappers import SSLDataset
 from saticl.utils.ml import seed_everything
 
 
@@ -52,7 +52,7 @@ def test_ssl_augmentations(potsdam_path: Path):
     # create the train dataset, then split or create the ad hoc validation set
     ssl_transform = ssl_transforms()
     dataset = create_dataset("potsdam", path=potsdam_path, subset="train", transform=train_transform, channels=4)
-    dataset = SSLDataset(dataset, ssl_transform=ssl_transform)
+    dataset = SSLDataset(dataset, transform=ssl_transform)
 
     denorm = Denormalize()
     n_images = 16

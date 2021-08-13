@@ -11,11 +11,16 @@ from timm.models.features import FeatureInfo
 
 class MultiEncoder(Encoder):
 
-    def __init__(self, encoder_rgb: Encoder, encoder_ir: Encoder, act_layer: Type[nn.Module],
-                 norm_layer: Type[nn.Module]):
+    def __init__(self,
+                 encoder_rgb: Encoder,
+                 encoder_ir: Encoder,
+                 act_layer: Type[nn.Module],
+                 norm_layer: Type[nn.Module],
+                 return_features: bool = False):
         super().__init__()
         self.encoder_rgb = encoder_rgb
         self.encoder_ir = encoder_ir
+        self.return_features = return_features
         self.ssmas = nn.ModuleList()
         for rgb_chs, ir_chs in zip(self.encoder_rgb.feature_info.channels(), self.encoder_ir.feature_info.channels()):
             self.ssmas.append(SSMA(rgb_channels=rgb_chs, ir_channels=ir_chs, act_layer=act_layer,
@@ -50,7 +55,10 @@ class MultiEncoder(Encoder):
         out_features = []
         for module, rgb, ir in zip(self.ssmas, rgb_features, ir_features):
             out_features.append(module(rgb, ir))
-        return out_features
+        result = {"out": out_features}
+        if self.return_features:
+            result.update(rgb=rgb_features, ir=ir_features)
+        return result
 
 
 # just a simple wrapper to include custom encoders into the list, if required

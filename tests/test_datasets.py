@@ -9,7 +9,8 @@ from albumentations.pytorch import ToTensorV2
 from saticl.datasets import create_dataset
 from saticl.datasets.icl import ICLDataset
 from saticl.datasets.isprs import PotsdamDataset
-from saticl.datasets.transforms import test_transforms, train_transforms
+from saticl.datasets.transforms import geom_transforms, test_transforms, train_transforms
+from saticl.datasets.wrappers import RotationDataset
 from saticl.tasks import Task
 from saticl.utils.ml import mask_set, seed_everything
 from tqdm import tqdm
@@ -221,3 +222,21 @@ def test_dataset_potsdam_icl_step2_weights(potsdam_path: Path, potsdam_weights: 
     assert len(weights) == 7
     LOG.info("Weights: %s", weights)
     LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, normalize=True))
+
+
+def test_dataset_potsdam_rotations(potsdam_path: Path):
+    # instantiate transforms for training
+    seed_everything(1337)
+    train_transform = test_transforms(in_channels=4)
+    # create the train dataset, then split or create the ad hoc validation set
+    train_dataset = create_dataset("potsdam", path=potsdam_path, subset="train", transform=train_transform, channels=4)
+    rotation_set = RotationDataset(train_dataset, transform=geom_transforms())
+    loader = DataLoader(rotation_set, batch_size=4, num_workers=1)
+    img, img_rot, masks, masks_rot = next(iter(loader))
+    LOG.info("%s - %s", str(img.shape), str(masks.shape))
+    assert img.shape == (4, 4, 512, 512)
+    assert masks.shape == (4, 512, 512)
+    assert img.shape == img_rot.shape
+    assert masks.shape == masks_rot.shape
+    # zero is not included unless we're in incremental learning
+    assert masks.min() >= 0 and masks.max() <= 5
