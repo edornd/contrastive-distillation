@@ -32,15 +32,24 @@ class MultiModalScaling(Regularizer):
 
 class AugmentationInvariance(Regularizer):
 
-    def __init__(self):
+    def __init__(self, gamma: float = 2.0):
         super().__init__()
-        self.loss = nn.CosineEmbeddingLoss()
+        self.gamma = gamma
+        self.criterion = nn.CosineEmbeddingLoss()
         self.flatten = nn.Flatten(start_dim=1)
 
-    def forward(self, features: Tensor, augmented: Tensor) -> torch.Tensor:
+    def forward(self, features: List[Tensor], augmented: List[Tensor]) -> torch.Tensor:
         # build a simple target of ones as big as the batch size, which is expected
         # to be the same for every output layer
-        targets = features.new_ones(features.size(0))
-        f1 = self.flatten(features)
-        f2 = self.flatten(augmented)
-        return self.loss(f1, f2, targets)
+        f = features[0]
+        targets = f.new_ones(f.size(0), dtype=f.dtype)
+        # construct a list of weights, one per feature map, weigh more at the bottom
+        num_layers = len(features)
+        weights = [(i / num_layers)**self.gamma for i in range(1, num_layers + 1)]
+        # sum up the losses for each layer
+        total_loss = torch.tensor(0.0, device=f.device)
+        for w, f, a in zip(weights, features, augmented):
+            f1 = self.flatten(f)
+            f2 = self.flatten(a)
+            total_loss += w * self.criterion(f1, f2, targets)
+        return total_loss

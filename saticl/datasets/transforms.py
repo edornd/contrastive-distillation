@@ -1,11 +1,16 @@
+import logging
 import random
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, List
 
 import torch
 
 import albumentations as alb
 from albumentations import functional as func
 from albumentations.pytorch import ToTensorV2
+from saticl.logging.console import DistributedLogger
+
+
+LOG = DistributedLogger(logging.getLogger(__name__))
 
 
 class Denormalize:
@@ -102,6 +107,23 @@ class ModalityDropout(alb.ImageOnlyTransform):
         return ["image"]
 
 
+class ContrastiveTransform:
+
+    def __init__(self, transform_a: alb.Compose, transform_b: alb.Compose = None) -> None:
+        if transform_b is None:
+            LOG.warn("Second transform is missing, using the first for both images")
+            transform_b = transform_a
+        self.transform_a = transform_a
+        self.transform_b = transform_b
+
+    def __call__(self, image: Any, mask: Any) -> Any:
+        pair1 = self.transform_a(image=image, mask=mask)
+        pair2 = self.transform_b(image=image, mask=mask)
+        x1, y1 = (pair1[k] for k in ("image", "mask"))
+        x2, y2 = (pair2[k] for k in ("image", "mask"))
+        return x1, x2, y1.long(), y2.long()
+
+
 def adapt_channels(mean: tuple, std: tuple, in_channels: int = 3):
     assert mean is not None and std is not None, "Non-null means and stds required"
     if in_channels > len(mean):
@@ -115,10 +137,11 @@ def train_transforms(image_size: int,
                      mean: tuple = (0.485, 0.456, 0.406),
                      std: tuple = (0.229, 0.224, 0.225),
                      channel_dropout: float = 0.0,
-                     modality_dropout: float = 0.0):
+                     modality_dropout: float = 0.0,
+                     normalize: bool = True,
+                     tensorize: bool = True,
+                     compose: bool = True):
     # alb.ChannelDropout(p=0.5, fill_value=0),
-    # if input channels are 4 and mean and std are for RGB only, copy red for IR
-    mean, std = adapt_channels(mean, std, in_channels=in_channels)
     min_crop = image_size // 4 * 3
     max_crop = image_size
     transforms = [
@@ -126,14 +149,19 @@ def train_transforms(image_size: int,
         alb.Flip(p=0.5),
         alb.RandomRotate90(p=0.5),
         alb.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.5, rotate_limit=90, p=0.5),
-        alb.RandomBrightnessContrast(p=0.8),
+        alb.RandomBrightnessContrast(p=0.5),
     ]
     if channel_dropout > 0:
         transforms.append(alb.ChannelDropout(p=channel_dropout))
     if modality_dropout > 0:
         transforms.append(ModalityDropout(p=modality_dropout))
-    transforms.extend([alb.Normalize(mean=mean, std=std), ToTensorV2()])
-    return alb.Compose(transforms)
+    if normalize:
+        # if input channels are 4 and mean and std are for RGB only, copy red for IR
+        mean, std = adapt_channels(mean, std, in_channels=in_channels)
+        transforms.append(alb.Normalize(mean=mean, std=std))
+    if tensorize:
+        transforms.append(ToTensorV2())
+    return alb.Compose(transforms) if compose else transforms
 
 
 def test_transforms(in_channels: int = 3,
@@ -147,10 +175,21 @@ def inverse_transform(mean: tuple = (0.485, 0.456, 0.406), std: tuple = (0.229, 
     return Denormalize(mean=mean, std=std)
 
 
-def geom_transforms():
-    # we should not require a normalization since we are dealing with transformed arrays already
-    return alb.Compose([alb.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.5, rotate_limit=90, always_apply=True),
-                        ToTensorV2()])
+def geom_transforms(base: List[alb.BasicTransform] = None,
+                    in_channels: int = 3,
+                    mean: tuple = (0.485, 0.456, 0.406),
+                    std: tuple = (0.229, 0.224, 0.225),
+                    normalize: bool = True,
+                    tensorize: bool = True,
+                    compose: bool = True):
+    transforms = base or []
+    transforms.extend([alb.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.25, rotate_limit=360, always_apply=True)])
+    if normalize:
+        mean, std = adapt_channels(mean, std, in_channels=in_channels)
+        transforms.append(alb.Normalize(mean=mean, std=std))
+    if tensorize:
+        transforms.append(ToTensorV2())
+    return alb.Compose(transforms) if compose else transforms
 
 
 def ssl_transforms():

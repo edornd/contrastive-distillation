@@ -1,7 +1,8 @@
 from collections import OrderedDict
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Union
 
+import numpy as np
 import torch
 
 from ordered_set import OrderedSet
@@ -57,6 +58,36 @@ class ICLDataset(DatasetBase):
             substitute = self.label2index.get(key, mask_value) if key in available else mask_value
             self.label_transform[key] = substitute
 
+    def _process_labels(self, labels: OrderedSet) -> OrderedSet:
+        shift = 0 if self._has_background else 1
+        tmp = OrderedSet([x + shift for x in labels])
+        # move any background in the wrong place to index 0
+        tmp.discard(0)
+        return OrderedSet([0]).union(tmp)
+
+    def _remap(self, label: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
+        """(relatively) fast mapping exploiting the `unique` functions, in numpy and torch.
+        The main idea is: first track unique values and their indices (where they are located),
+        then swap each unique value with its match and use the inverse mapping to remap the full tensor.
+        The shape must be rebuilt after the lookup.
+
+        Args:
+            label (Union[np.ndarray, torch.Tensor]): input label, as np array or torch tensor, depends on dataset
+                                                     and whether we applied a transform or not before this.
+
+        Returns:
+            Union[np.ndarray, torch.Tensor]: returns a matrix with same shape and type, but with remapped labels,
+                                             following the current incremental step.
+        """
+        if isinstance(label, torch.Tensor):
+            unique, inverse = torch.unique(label, return_inverse=True)
+            result = torch.tensor([self.label_transform[x.item()] for x in unique])[inverse].reshape(label.shape)
+        else:
+            # for numpy is actually the same, just without the item()
+            unique, inverse = np.unique(label, return_inverse=True)
+            result = np.array([self.label_transform[x] for x in unique])[inverse].reshape(label.shape)
+        return result
+
     def __len__(self):
         return len(self.dataset)
 
@@ -67,15 +98,9 @@ class ICLDataset(DatasetBase):
             label[label != self.ignore_index()] += 1
         # use the lookup dictionary for indexing
         if self.label_transform is not None:
-            label.apply_(lambda x: self.label_transform[x])
-        return image, label.long()
-
-    def _process_labels(self, labels: OrderedSet) -> OrderedSet:
-        shift = 0 if self._has_background else 1
-        tmp = OrderedSet([x + shift for x in labels])
-        # move any background in the wrong place to index 0
-        tmp.discard(0)
-        return OrderedSet([0]).union(tmp)
+            # alternative: label.apply_(lambda x: self.label_transform[x])
+            label = self._remap(label)
+        return image, label
 
     def name(self) -> str:
         return self.dataset.name()

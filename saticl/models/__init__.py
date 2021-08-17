@@ -43,7 +43,7 @@ def create_encoder(name: str,
     indices = available_decoders[decoder].func.required_indices(encoder=name)
     model = timm.create_model(name, pretrained=pretrained, features_only=True, out_indices=indices, **additional_args)
     if channels > 3:
-        model = expand_input(model)
+        model = expand_input(model, num_copies=(channels - 3))
     # freeze layers in the encoder if required
     if freeze:
         for param in model.parameters():
@@ -52,8 +52,8 @@ def create_encoder(name: str,
     return model
 
 
-def create_decoder(name: str, feature_info: FeatureInfo, act_layer: Type[nn.Module],
-                   norm_layer: Type[nn.Module]) -> Decoder:
+def create_decoder(name: str, feature_info: FeatureInfo, act_layer: Type[nn.Module], norm_layer: Type[nn.Module],
+                   **kwargs: dict) -> Decoder:
     # sanity check to keep going with no worries
     assert name in available_decoders, f"Decoder '{name}' not implemented"
     # retrieve the partial object and instantiate with the common params
@@ -61,5 +61,6 @@ def create_decoder(name: str, feature_info: FeatureInfo, act_layer: Type[nn.Modu
     decoder = decoder_class(feature_channels=feature_info.channels(),
                             feature_reductions=feature_info.reduction(),
                             act_layer=act_layer,
-                            norm_layer=norm_layer)
+                            norm_layer=norm_layer,
+                            **kwargs)
     return decoder

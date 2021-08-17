@@ -2,11 +2,12 @@ import logging
 
 import numpy as np
 import torch
+from torch.nn import CrossEntropyLoss
 
 import albumentations as alb
 from albumentations.pytorch import ToTensorV2
 from saticl.config import ModelConfig
-from saticl.losses import FocalTverskyLoss, UnbiasedFTLoss
+from saticl.losses import FocalTverskyLoss, TanimotoLoss, UnbiasedFTLoss
 from saticl.losses.regularization import AugmentationInvariance, MultiModalScaling
 from saticl.prepare import create_multi_encoder
 
@@ -35,6 +36,23 @@ def test_tversky_loss_unbiased():
     loss = criterion(y_pred, y_true)
     LOG.info(loss)
     assert loss >= 0 and loss <= 1
+
+
+def test_tanimoto_tversky_loss():
+    # emulate a logits output
+    torch.manual_seed(42)
+    y_pred = torch.rand((2, 5, 256, 256)) * 5
+    y_true = torch.randint(0, 5, (2, 256, 256))
+    y_true = (y_pred.argmax(dim=1) + 1) % 5
+    # compute loss
+    criterion1 = TanimotoLoss(ignore_index=255)
+    criterion2 = FocalTverskyLoss(ignore_index=255)
+    criterion3 = CrossEntropyLoss(ignore_index=255)
+
+    loss1 = criterion1(y_pred, y_true)
+    loss2 = criterion2(y_pred, y_true)
+    loss3 = criterion3(y_pred, y_true)
+    LOG.info("TAN: %s - FTL: %s - CE: %s", loss1, loss2, loss3)
 
 
 def test_multimodal_scaling():

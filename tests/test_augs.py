@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -6,9 +7,18 @@ import albumentations as alb
 from albumentations.pytorch import ToTensorV2
 from matplotlib import pyplot as plt
 from saticl.datasets import create_dataset
-from saticl.datasets.transforms import Denormalize, ModalityDropout, ssl_transforms, train_transforms
-from saticl.datasets.wrappers import SSLDataset
+from saticl.datasets.transforms import (
+    ContrastiveTransform,
+    Denormalize,
+    ModalityDropout,
+    geom_transforms,
+    ssl_transforms,
+    train_transforms,
+)
+from saticl.datasets.wrappers import ContrastiveDataset, SSLDataset
 from saticl.utils.ml import seed_everything
+
+LOG = logging.getLogger(__name__)
 
 
 def test_modality_dropout(potsdam_path: Path):
@@ -82,4 +92,48 @@ def test_ssl_augmentations(potsdam_path: Path):
 
     plt.tight_layout()
     plt.savefig("data/ssl_augs.png")
+    plt.close(fig)
+
+
+def test_contrastive_augmentations_potsdam(potsdam_path: Path):
+    # instantiate transforms for training
+    seed_everything(1337)
+    # create the train dataset, then split or create the ad hoc validation set
+    train_transform = train_transforms(image_size=512,
+                                       in_channels=4,
+                                       channel_dropout=0.5,
+                                       normalize=False,
+                                       tensorize=False)
+    train_dataset = create_dataset("potsdam", path=potsdam_path, subset="train", transform=train_transform, channels=4)
+    extra_trf = geom_transforms(in_channels=4, normalize=True, tensorize=True)
+    dataset = ContrastiveDataset(train_dataset, transform=ContrastiveTransform(extra_trf, extra_trf))
+
+    denorm = Denormalize()
+    n_images = 16
+    values = np.random.choice(len(dataset), size=n_images, replace=False)
+    samples = [dataset.__getitem__(i) for i in values]
+    nrows = int(np.sqrt(n_images))
+    width = 4
+    ncols = nrows * width    # account for two IR, same and rotated
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10 * width, 10))
+
+    for r in range(nrows):
+        for c in range(ncols // width):
+            index = r * nrows + c
+            # retrieve images and denormalize them, channels IRRG
+            img1, img2, mask1, mask2 = samples[index]
+            img1 = denorm(img1[[3, 0, 1]])
+            img2 = denorm(img2[[3, 0, 1]])
+            # plot images
+            axes[r, c * width].imshow(img1)
+            axes[r, c * width].set_title("x1")
+            axes[r, c * width + 1].imshow(mask1)
+            axes[r, c * width + 1].set_title("y1")
+            axes[r, c * width + 2].imshow(img2)
+            axes[r, c * width + 2].set_title("x2")
+            axes[r, c * width + 3].imshow(mask2)
+            axes[r, c * width + 3].set_title("y2")
+
+    plt.tight_layout()
+    plt.savefig("data/contrastive_set.png")
     plt.close(fig)

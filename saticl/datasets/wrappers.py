@@ -1,9 +1,9 @@
-from typing import Any, Callable, Dict, List
+from typing import Any, Dict, List
 
 import torch
 
 from saticl.datasets.base import DatasetBase
-from saticl.datasets.transforms import SSLTransform
+from saticl.datasets.transforms import ContrastiveTransform, SSLTransform
 
 
 class SSLDataset(DatasetBase):
@@ -51,9 +51,9 @@ class SSLDataset(DatasetBase):
         return self.dataset.has_background()
 
 
-class RotationDataset(SSLDataset):
+class ContrastiveDataset(SSLDataset):
 
-    def __init__(self, dataset: DatasetBase, transform: Callable) -> None:
+    def __init__(self, dataset: DatasetBase, transform: ContrastiveTransform) -> None:
         super().__init__(dataset=dataset, transform=transform)
 
     def __getattribute__(self, name: str) -> Any:
@@ -63,10 +63,6 @@ class RotationDataset(SSLDataset):
             return self.dataset.__getattribute__(name)
 
     def __getitem__(self, index) -> Any:
+        # we expect numpy arrays
         image, label = self.dataset[index]
-        image_rot = image.permute(1, 2, 0).numpy()
-        label_rot = label.numpy()
-        pair = self.transform(image=image_rot, mask=label_rot)
-        image_rot = pair.get("image")
-        label_rot = pair.get("mask")
-        return image, image_rot, label, label_rot
+        return self.transform(image=image, mask=label)

@@ -22,13 +22,24 @@ from saticl.utils.ml import mask_set
 LOG = get_logger(__name__)
 
 
-def prepare_dataset(config: Configuration) -> ICLDataset:
+def prepare_dataset(config: Configuration, include_transforms: bool = True) -> ICLDataset:
     # instantiate transforms for training and evaluation
+    # we keep them without norm and toTensor in case of contrastive regularization, so that we can transform later
+    # after the ICL filtering, using the ContrastiveDataset wrapper
     data_root = Path(config.data_root)
-    train_transform = train_transforms(image_size=config.image_size,
-                                       in_channels=config.in_channels,
-                                       channel_dropout=config.channel_drop,
-                                       modality_dropout=config.modality_drop)
+    if config.ce.aug_factor > 0 and include_transforms:
+        train_transform = train_transforms(image_size=config.image_size,
+                                           in_channels=config.in_channels,
+                                           channel_dropout=config.channel_drop,
+                                           modality_dropout=config.modality_drop,
+                                           normalize=False,
+                                           tensorize=False)
+    else:
+        train_transform = train_transforms(image_size=config.image_size,
+                                           in_channels=config.in_channels,
+                                           channel_dropout=config.channel_drop,
+                                           modality_dropout=config.modality_drop)
+    config.model.transforms = str(train_transform)
     eval_transform = test_transforms(in_channels=config.in_channels)
     LOG.debug("Train transforms: %s", str(train_transform))
     LOG.debug("Eval. transforms: %s", str(eval_transform))
@@ -105,10 +116,15 @@ def prepare_model(config: Configuration, task: Task) -> nn.Module:
         NotImplementedError(f"The provided list of encoders is not supported: {cfg.encoder}")
     # create decoder: always uses the RGB encoder as reference
     # SSMA blocks in the multiencoder merge the features into a number of channels equal to RGB for each layer.
+    additional_args = dict()
+    if hasattr(config.model, "dropout2d"):
+        LOG.info("Adding 2D dropout to the decoder's head: %s", str(config.model.dropout2d))
+        additional_args.update(drop_channels=config.model.dropout2d)
     decoder = create_decoder(name=cfg.decoder,
                              feature_info=encoder.feature_info,
                              act_layer=cfg.act,
-                             norm_layer=cfg.norm)
+                             norm_layer=cfg.norm,
+                             **additional_args)
     # extract intermediate features when encoder KD is required
     extract_features = config.kd.encoder_factor > 0 or config.ce.aug_factor > 0
     LOG.info("Returning intermediate features: %s", str(extract_features))

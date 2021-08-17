@@ -8,8 +8,8 @@ from torch.utils.data import DataLoader
 
 from saticl.config import Configuration, SSLConfiguration
 from saticl.datasets.icl import ICLDataset
-from saticl.datasets.transforms import geom_transforms, inverse_transform, ssl_transforms
-from saticl.datasets.wrappers import RotationDataset, SSLDataset
+from saticl.datasets.transforms import ContrastiveTransform, geom_transforms, inverse_transform, ssl_transforms
+from saticl.datasets.wrappers import ContrastiveDataset, SSLDataset
 from saticl.logging.tensorboard import TensorBoardLogger
 from saticl.losses.regularization import AugmentationInvariance
 from saticl.models.icl import ICLSegmenter
@@ -19,7 +19,7 @@ from saticl.trainer.base import Trainer
 from saticl.trainer.callbacks import Checkpoint, DisplaySamples, EarlyStopping, EarlyStoppingCriterion
 from saticl.trainer.invariance import AugInvarianceTrainer
 from saticl.trainer.ssl import SSLStage, SSLTrainer
-from saticl.utils.common import flatten_config, get_logger, store_config
+from saticl.utils.common import flatten_config, get_logger, git_revision_hash, store_config
 from saticl.utils.ml import checkpoint_path, init_experiment, seed_everything, seed_worker
 
 
@@ -71,7 +71,6 @@ def train(config: Configuration):
     log_name = f"output-{config.task.step}.log"
     exp_id, out_folder, model_folder, logs_folder = init_experiment(config=config, log_name=log_name)
     config_path = out_folder / f"segmenter-config-s{config.task.step}.yaml"
-    store_config(config, path=config_path)
     LOG.info("Run started")
     LOG.info("Experiment ID: %s", exp_id)
     LOG.info("Output folder: %s", out_folder)
@@ -84,7 +83,7 @@ def train(config: Configuration):
     seed_everything(config.seed)
     # prepare datasets
     LOG.info("Loading datasets...")
-    train_set, valid_set = prepare_dataset(config=config)
+    train_set, valid_set = prepare_dataset(config=config, include_transforms=True)
     LOG.info("Full sets - train set: %d samples, validation set: %d samples", len(train_set), len(valid_set))
 
     add_background = not train_set.has_background()
@@ -95,9 +94,15 @@ def train(config: Configuration):
     train_mask, valid_mask = 0, 255
     train_set = ICLDataset(dataset=train_set, task=task, mask_value=train_mask, overlap=config.task.overlap)
     valid_set = ICLDataset(dataset=valid_set, task=task, mask_value=valid_mask, overlap=config.task.overlap)
+    # if we are in a contrastive regularization scenario, wrap the set once again
+    # and add train transforms (which will be applied twice per image)
     if config.ce.aug_factor > 0:
-        LOG.info("Wrapping into rotation-augmented dataset")
-        train_set = RotationDataset(train_set, transform=geom_transforms())
+        LOG.info("Wrapping into contrastive-based dataset")
+        # we pass the same transform, which will be applied twice for two different results from the same img
+        extra = geom_transforms(in_channels=config.in_channels, normalize=True, tensorize=True, compose=True)
+        train_set = ContrastiveDataset(train_set, transform=ContrastiveTransform(transform_a=extra, transform_b=extra))
+        config.model.transforms += str(extra)
+    # construct data loaders
     train_loader = DataLoader(dataset=train_set,
                               batch_size=config.trainer.batch_size,
                               shuffle=True,
@@ -162,7 +167,11 @@ def train(config: Configuration):
     trainer_class = Trainer
     kwargs = dict()
     if config.ce.aug_factor > 0:
-        kwargs.update(rot_criterion=AugmentationInvariance(), rot_lambda=config.ce.aug_factor)
+        kwargs.update(aug_criterion=AugmentationInvariance(gamma=2.0),
+                      aug_lambda=config.ce.aug_factor,
+                      aug_layers=config.ce.aug_layers,
+                      temperature=config.trainer.temperature,
+                      temp_epochs=config.trainer.temp_epochs)
         trainer_class = AugInvarianceTrainer
     trainer = trainer_class(accelerator=accelerator,
                             task=task,
@@ -192,10 +201,13 @@ def train(config: Configuration):
                                     save_best=True)) \
            .add_callback(DisplaySamples(inverse_transform=inverse_transform(),
                                         color_palette=train_set.palette()))
+    # storing config and starting training
+    config.version = git_revision_hash()
+    store_config(config, path=config_path)
     trainer.fit(train_dataloader=train_loader, val_dataloader=valid_loader, max_epochs=config.trainer.max_epochs)
     LOG.info(f"Training completed at epoch {trainer.current_epoch:<2d} "
              f"(best {monitored}: {trainer.best_score:.4f})")
-    LOG.info("Experiment %s completed!", exp_id)
+    LOG.info("Experiment %s (step %d) completed!", exp_id, task.step)
 
 
 def train_ssl(config: SSLConfiguration):
@@ -336,4 +348,4 @@ def train_ssl(config: SSLConfiguration):
     trainer.fit(train_dataloader=train_loader, val_dataloader=valid_loader, max_epochs=config.trainer.max_epochs)
     LOG.info(f"Training completed at epoch {trainer.current_epoch:<2d} "
              f"(best {monitored}: {trainer.best_score:.4f})")
-    LOG.info("Experiment %s completed!", exp_id)
+    LOG.info("Experiment %s (step %d) completed!", exp_id, task.step)

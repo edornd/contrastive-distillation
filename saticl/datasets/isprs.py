@@ -36,7 +36,7 @@ class ISPRSDataset(DatasetBase):
         self._postfix = postfix
         self._channels = channels
         self._ignore_index = ignore_index
-        self._include_dsm = include_dsm
+        self._include_dsm = include_dsm or channels == 5
         self._name = city
         self._subset = subset
         self.transform = transform
@@ -116,11 +116,13 @@ class ISPRSDataset(DatasetBase):
         if self._include_dsm:
             dsm = tif.imread(self.dsm_files[index]).astype(np.float32)
             image = np.dstack((image, dsm))
-        # preprocess if required
+        # preprocess if required, cast mask to Long for torch's CE
         if self.transform is not None:
             pair = self.transform(image=image, mask=mask)
             image = pair.get("image")
             mask = pair.get("mask")
+        else:
+            mask = torch.tensor(mask)
         return image, mask
 
     def __len__(self) -> int:
@@ -129,33 +131,11 @@ class ISPRSDataset(DatasetBase):
 
 class PotsdamDataset(ISPRSDataset):
 
-    def __init__(self,
-                 path: Path,
-                 subset: str,
-                 include_dsm: bool = False,
-                 transform: Callable = None,
-                 channels: int = 3) -> None:
-        super().__init__(path,
-                         city="potsdam",
-                         subset=subset,
-                         postfix="rgbir",
-                         channels=channels,
-                         include_dsm=include_dsm,
-                         transform=transform)
+    def __init__(self, path: Path, subset: str, transform: Callable = None, channels: int = 3) -> None:
+        super().__init__(path, city="potsdam", subset=subset, postfix="rgbir", channels=channels, transform=transform)
 
 
 class VaihingenDataset(ISPRSDataset):
 
-    def __init__(self,
-                 path: Path,
-                 subset: str,
-                 include_dsm: bool = False,
-                 transform: Callable = None,
-                 channels: int = 3) -> None:
-        super().__init__(path,
-                         city="vaihingen",
-                         subset=subset,
-                         postfix="rgb",
-                         channels=channels,
-                         include_dsm=include_dsm,
-                         transform=transform)
+    def __init__(self, path: Path, subset: str, transform: Callable = None, channels: int = 3) -> None:
+        super().__init__(path, city="vaihingen", subset=subset, postfix="rgb", channels=channels, transform=transform)

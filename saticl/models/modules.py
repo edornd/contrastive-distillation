@@ -170,9 +170,15 @@ class UNetDecodeBlock(nn.Module):
 
 class UNetHead(nn.Module):
 
-    def __init__(self, in_channels: int, num_classes: int, scale_factor: int = 2, dropout_prob: float = 0.5):
+    def __init__(self,
+                 in_channels: int,
+                 num_classes: int,
+                 scale_factor: int = 2,
+                 dropout_prob: float = 0.5,
+                 drop_channels: bool = False):
         super().__init__()
-        self.dropout = nn.Dropout(p=dropout_prob)
+        drop_class = nn.Dropout2d if drop_channels else nn.Dropout
+        self.dropout = drop_class(p=dropout_prob, inplace=True)
         self.upsample = nn.Upsample(scale_factor=scale_factor, mode="bilinear", align_corners=True)
         self.out = nn.Conv2d(in_channels, num_classes, kernel_size=1) if num_classes else nn.Identity()
 

@@ -9,9 +9,11 @@ from pydantic import BaseSettings, Field, validator
 from saticl.cli import CallableEnum, Initializer, ObjectSettings, StringEnum
 from saticl.losses import (
     CombinedLoss,
+    DualTanimotoLoss,
     FocalLoss,
     FocalTverskyLoss,
     KDLoss,
+    TanimotoLoss,
     UnbiasedCrossEntropy,
     UnbiasedFocalLoss,
     UnbiasedFTLoss,
@@ -50,11 +52,22 @@ class Schedulers(CallableEnum):
 
 
 class Losses(CallableEnum):
-    crossent = Initializer(CrossEntropyLoss, ignore_index=255)
-    tversky = Initializer(FocalTverskyLoss, alpha=0.7, beta=0.3)
+    crossent = CrossEntropyLoss
+    focal = FocalLoss
+    tversky = FocalTverskyLoss
+    tanimoto = TanimotoLoss
+    compl = DualTanimotoLoss
     combo = Initializer(CombinedLoss,
                         criterion_a=Initializer(CrossEntropyLoss),
                         criterion_b=Initializer(FocalTverskyLoss))
+
+
+class UnbiasLosses(CallableEnum):
+    crossent = UnbiasedCrossEntropy
+    focal = UnbiasedFocalLoss
+    tverksy = UnbiasedFTLoss
+    tanimoto = TanimotoLoss
+    compl = DualTanimotoLoss
 
 
 class Metrics(CallableEnum):
@@ -85,11 +98,13 @@ class TrainerConfig(BaseSettings):
     monitor: Metrics = Field(Metrics.f1, description="Metric to be monitored")
     patience: int = Field(20, description="Amount of epochs without improvement in the monitored metric")
     validate_every: int = Field(1, description="How many epochs between validation rounds")
+    temperature: float = Field(2.0, description="Temperature for simulated annealing, >= 1")
+    temp_epochs: int = Field(20, description="How many epochs before T goes back to 1")
 
 
 class OptimizerConfig(ObjectSettings):
     target: Optimizers = Field(Optimizers.adamw, description="Which optimizer to apply")
-    lr: float = Field(1e-3, description="Learning rate for the optimizer")
+    lr: float = Field(5e-4, description="Learning rate for the optimizer")
     momentum: float = Field(0.9, description="Momentum for SGD")
     weight_decay: float = Field(1e-2, description="Weight decay for the optimizer")
 
@@ -120,38 +135,28 @@ class KDConfig(ObjectSettings):
 
 class CEConfig(ObjectSettings):
     unbiased: bool = Field(False, description="Enables unbiased main loss")
-    focal: bool = Field(False, description="Enables focal loss variant")
-    tversky: bool = Field(False, description="Enables a generalized Dice loss")
+    name: str = Field("crossent", description="Loss name among (crossent, focal, tversky, tanimoto)")
     alpha: float = Field(0.6, description="Alpha param. for Tversky loss (0.5 for Dice)")
     beta: float = Field(0.4, description="Beta param. for Tversky loss (0.5 foor Dice)")
     gamma: float = Field(2.0, description="Gamma param. for focal loss (1.0 for standard CE)")
     aug_factor: float = Field(0.0, description="Multiplier for the augmentation invariance regularization")
+    aug_layers: int = Field(1, description="How many layers to regularize, starting from the bottom")
 
     def instantiate(self, *args, **kwargs) -> Any:
         assert "ignore_index" in kwargs, "Ignore index required"
         assert "old_class_count" in kwargs, "Number of old classes is required for the unbiased setting"
+        # update current kwargs according to the loss
+        if self.name == "focal" or self.name == "tanimoto":
+            kwargs.update(gamma=self.gamma)
+        elif self.name == "tversky":
+            kwargs.update(alpha=self.alpha, beta=self.beta, gamma=self.gamma)
         # unbiased loss is only useful from step 1 onwards
         if self.unbiased and kwargs.get("old_class_count") > 0:
-            if self.focal:
-                kwargs.update(gamma=self.gamma)
-                loss_class = UnbiasedFocalLoss
-            elif self.tversky:
-                kwargs.update(alpha=self.alpha, beta=self.beta, gamma=self.gamma)
-                loss_class = UnbiasedFTLoss
-            else:
-                loss_class = UnbiasedCrossEntropy
-            return loss_class(*args, **kwargs)
+            loss_class = UnbiasLosses[self.name]
         else:
             kwargs.pop("old_class_count")
-            if self.focal:
-                kwargs.update(gamma=self.gamma)
-                loss_class = FocalLoss
-            elif self.tversky:
-                kwargs.update(alpha=self.alpha, beta=self.beta, gamma=self.gamma)
-                loss_class = FocalTverskyLoss
-            else:
-                loss_class = CrossEntropyLoss
-            return loss_class(*args, **kwargs)
+            loss_class = Losses[self.name]
+        return loss_class(*args, **kwargs)
 
 
 class TaskConfig(BaseSettings):
@@ -170,6 +175,8 @@ class ModelConfig(BaseSettings):
     init_balanced: bool = Field(False, description="Enable background-based initialization for new classes")
     act: ActivationLayers = Field(ActivationLayers.relu, description="Which activation layer to use")
     norm: NormLayers = Field(NormLayers.std, description="Which normalization layer to use")
+    dropout2d: bool = Field(False, description="Whether to apply standard drop. or channel drop. to the last f.map")
+    transforms: str = Field("", description="Automatically populated by the script for tracking purposes")
 
     @validator("norm")
     def post_load(cls, v, values, **kwargs):
@@ -214,6 +221,7 @@ class Configuration(BaseSettings):
     num_samples: int = Field(1, description="How many sample batches to visualize, requires visualize=true")
     visualize: bool = Field(True, description="Turn on visualization on tensorboard")
     comment: str = Field("", description="Anything to describe your run, gets stored on tensorboard")
+    version: str = Field("", description="Code version for tracking, obtained from git automatically")
 
     @validator("method")
     def post_load(cls, v, values, **kwargs):
