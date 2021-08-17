@@ -93,8 +93,8 @@ class AugInvarianceTrainer(Trainer):
         with self.accelerator.autocast():
             split = x1.size(0)
             new_out, new_features = self.model(full_x)
-            if self.temperature:
-                new_out /= self.temperature
+            # if self.temperature:
+            #     new_out /= self.temperature
             seg_loss = self.criterion(new_out, full_y)
             # rotation invariance loss
             # since we are feeding the same images augmented twice, the output features contain both

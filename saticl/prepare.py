@@ -41,8 +41,8 @@ def prepare_dataset(config: Configuration, include_transforms: bool = True) -> I
                                            modality_dropout=config.modality_drop)
     config.model.transforms = str(train_transform)
     eval_transform = test_transforms(in_channels=config.in_channels)
-    LOG.debug("Train transforms: %s", str(train_transform))
-    LOG.debug("Eval. transforms: %s", str(eval_transform))
+    LOG.info("Train transforms: %s", str(train_transform))
+    LOG.info("Eval. transforms: %s", str(eval_transform))
     # create the train dataset, then split or create the ad hoc validation set
     train_dataset = create_dataset(config.dataset,
                                    path=data_root,

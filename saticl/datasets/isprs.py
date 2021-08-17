@@ -34,7 +34,7 @@ class ISPRSDataset(DatasetBase):
                  transform: Callable = None) -> None:
         super().__init__()
         self._postfix = postfix
-        self._channels = channels
+        self._channels = max(channels, 4)
         self._ignore_index = ignore_index
         self._include_dsm = include_dsm or channels == 5
         self._name = city
@@ -53,7 +53,7 @@ class ISPRSDataset(DatasetBase):
             mask_tile = "_".join(os.path.basename(mask).split("_")[:-1])
             assert image_tile == mask_tile, f"image: {image_tile} != mask: {mask_tile}"
         # add the optional digital surface map
-        if include_dsm:
+        if self._include_dsm:
             self.dsm_files = sorted(glob.glob(os.path.join(path, self.dsm_naming())))
             assert len(self.image_files) == len(self.dsm_files), "Length mismatch between tiles and DSMs"
             for image, dsm in zip(self.image_files, self.dsm_files):

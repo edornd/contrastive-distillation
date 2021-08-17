@@ -124,11 +124,12 @@ class ContrastiveTransform:
         return x1, x2, y1.long(), y2.long()
 
 
-def adapt_channels(mean: tuple, std: tuple, in_channels: int = 3):
-    assert mean is not None and std is not None, "Non-null means and stds required"
-    if in_channels > len(mean):
-        mean += (mean[0],)
-        std += (std[0],)
+def adapt_channels(mean: tuple, std: tuple, in_channels: int = 3, copy_channel: int = 0):
+    assert mean is not None and std is not None, "Missing required means and stds"
+    replicas = in_channels - len(mean)
+    for _ in range(replicas):
+        mean += (mean[copy_channel],)
+        std += (std[copy_channel],)
     return mean, std
 
 
@@ -183,7 +184,7 @@ def geom_transforms(base: List[alb.BasicTransform] = None,
                     tensorize: bool = True,
                     compose: bool = True):
     transforms = base or []
-    transforms.extend([alb.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.25, rotate_limit=360, always_apply=True)])
+    transforms.extend([alb.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.25, rotate_limit=90, always_apply=True)])
     if normalize:
         mean, std = adapt_channels(mean, std, in_channels=in_channels)
         transforms.append(alb.Normalize(mean=mean, std=std))

@@ -176,10 +176,10 @@ def test_dataset_potsdam_icl_step0_weights(potsdam_path: Path, potsdam_weights: 
     assert icl_set.categories()[1] == "impervious_surfaces"
     assert len(icl_set) < original_length
     # load weights
-    weights = icl_set.load_class_weights(potsdam_weights)
+    weights = icl_set.load_class_weights(potsdam_weights, device=torch.device("cpu"))
     assert len(weights) == 4
     LOG.info("Weights: %s", weights)
-    LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, normalize=True))
+    LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, device=torch.device("cpu"), normalize=True))
 
 
 def test_dataset_potsdam_icl_step1_weights(potsdam_path: Path, potsdam_weights: Path):
@@ -197,10 +197,10 @@ def test_dataset_potsdam_icl_step1_weights(potsdam_path: Path, potsdam_weights: 
     assert icl_set.categories()[1] == "impervious_surfaces"
     assert len(icl_set) < original_length
     # load weights
-    weights = icl_set.load_class_weights(potsdam_weights)
+    weights = icl_set.load_class_weights(potsdam_weights, device=torch.device("cpu"))
     assert len(weights) == 6
     LOG.info("Weights: %s", weights)
-    LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, normalize=True))
+    LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, device=torch.device("cpu"), normalize=True))
 
 
 def test_dataset_potsdam_icl_step2_weights(potsdam_path: Path, potsdam_weights: Path):
@@ -218,10 +218,10 @@ def test_dataset_potsdam_icl_step2_weights(potsdam_path: Path, potsdam_weights: 
     assert icl_set.categories()[1] == "impervious_surfaces"
     assert len(icl_set) < original_length
     # load weights
-    weights = icl_set.load_class_weights(potsdam_weights)
+    weights = icl_set.load_class_weights(potsdam_weights, device=torch.device("cpu"))
     assert len(weights) == 7
     LOG.info("Weights: %s", weights)
-    LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, normalize=True))
+    LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, device=torch.device("cpu"), normalize=True))
 
 
 def test_dataset_potsdam_augmentations(potsdam_path: Path):

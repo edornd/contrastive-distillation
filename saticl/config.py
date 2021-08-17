@@ -47,8 +47,8 @@ class Optimizers(CallableEnum):
 
 class Schedulers(CallableEnum):
     plateau = Initializer(ReduceLROnPlateau)
-    exp = Initializer(ExponentialLR, gamma=0.87)
-    cosine = Initializer(CosineAnnealingLR, T_max=10)
+    exp = Initializer(ExponentialLR, gamma=0.9)
+    cosine = Initializer(CosineAnnealingLR, T_max=50)
 
 
 class Losses(CallableEnum):
@@ -104,7 +104,7 @@ class TrainerConfig(BaseSettings):
 
 class OptimizerConfig(ObjectSettings):
     target: Optimizers = Field(Optimizers.adamw, description="Which optimizer to apply")
-    lr: float = Field(5e-4, description="Learning rate for the optimizer")
+    lr: float = Field(1e-3, description="Learning rate for the optimizer")
     momentum: float = Field(0.9, description="Momentum for SGD")
     weight_decay: float = Field(1e-2, description="Weight decay for the optimizer")
 
