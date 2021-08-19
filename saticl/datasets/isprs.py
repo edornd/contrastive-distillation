@@ -34,7 +34,8 @@ class ISPRSDataset(DatasetBase):
                  transform: Callable = None) -> None:
         super().__init__()
         self._postfix = postfix
-        self._channels = max(channels, 4)
+        # no more than 4 channels, the 5th is added by stacking the DSM
+        self._channels = min(channels, 4)
         self._ignore_index = ignore_index
         self._include_dsm = include_dsm or channels == 5
         self._name = city

@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 import numpy as np
@@ -13,10 +14,12 @@ from saticl.datasets.transforms import (
     ModalityDropout,
     geom_transforms,
     ssl_transforms,
+    test_transforms,
     train_transforms,
 )
 from saticl.datasets.wrappers import ContrastiveDataset, SSLDataset
-from saticl.utils.ml import seed_everything
+from saticl.utils.ml import mask_set, mask_to_rgb, seed_everything
+from tqdm import tqdm
 
 LOG = logging.getLogger(__name__)
 
@@ -137,3 +140,36 @@ def test_contrastive_augmentations_potsdam(potsdam_path: Path):
     plt.tight_layout()
     plt.savefig("data/contrastive_set.png")
     plt.close(fig)
+
+
+def test_icl_val_display_potsdam(potsdam_path: Path):
+    # instantiate transforms for training
+    seed_everything(1337)
+    # create the train dataset, then split or create the ad hoc validation set
+    eval_transform = test_transforms(in_channels=4)
+    dataset = create_dataset("potsdam", path=potsdam_path, subset="train", transform=None, channels=4)
+    train_mask, val_mask, _ = mask_set(len(dataset), val_size=0.1, test_size=0.0)
+    LOG.debug("Creating val. set from training, split: %d - %d", sum(train_mask), sum(val_mask))
+    val_dataset = create_dataset("potsdam", path=potsdam_path, subset="train", transform=eval_transform, channels=4)
+    # val_dataset.add_mask(val_mask, stage="valid")
+    # make it incremental
+    # val_dataset = ICLDataset(dataset=val_dataset, task=task, mask_value=255, filter_mode="split", mask_old=False)
+    # now plot some samples to check their labels
+    results_path = Path("data/images")
+    if not results_path.exists():
+        os.makedirs(str(results_path))
+
+    # dataset_mask = np.load("data/tasks/potsdam/6s_step-3_valid_split.npy")
+    # val_dataset.add_mask(dataset_mask)
+    denorm = Denormalize()
+    for i, batch in tqdm(enumerate(val_dataset)):
+        img, mask = batch
+        fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(3 * 2, 3))
+        img = denorm(img[[3, 0, 1]])
+        axes[0].imshow(img)
+        axes[0].set_title("image")
+        axes[1].imshow(mask_to_rgb(mask, palette=val_dataset.palette()))
+        axes[1].set_title("label")
+        plt.tight_layout()
+        plt.savefig(f"{str(results_path)}/{i:4d}-full.png")
+        plt.close(fig)

@@ -43,7 +43,7 @@ def test(test_config: TestConfiguration):
     config: Configuration = load_config(path=config_path, config_class=Configuration)
 
     # prepare accelerator
-    accelerator = Accelerator(fp16=config.trainer.amp, cpu=config.trainer.cpu)
+    accelerator = Accelerator(fp16=test_config.trainer.amp, cpu=test_config.trainer.cpu)
     accelerator.wait_for_everyone()
 
     # seeding everything
@@ -103,8 +103,8 @@ def test(test_config: TestConfiguration):
                                comment=config.comment)
 
     # prepare trainer
-    LOG.info("Visualize: %s, num. batches for visualization: %s", str(config.visualize), str(config.num_samples))
-    num_samples = int(config.visualize) * config.num_samples
+    LOG.info("Visualize: %s, num. batches for visualization: %s", str(test_config.visualize), str(test_config.num_samples))
+    num_samples = int(test_config.visualize) * test_config.num_samples
     trainer = Trainer(accelerator=accelerator,
                       task=task,
                       new_model=model,
