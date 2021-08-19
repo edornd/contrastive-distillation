@@ -1,3 +1,6 @@
+import logging
+import random
+from collections import defaultdict
 from pathlib import Path
 from typing import Iterable, List
 
@@ -5,14 +8,17 @@ import numpy as np
 
 from ordered_set import OrderedSet
 from saticl.datasets.base import DatasetBase
+from saticl.logging.console import DistributedLogger
 from saticl.utils.common import prepare_folder
 from tqdm import tqdm
 
 
+LOG = DistributedLogger(logging.getLogger(__name__))
+
 ICL_ISPRS = {
     # full segmentation, without incremental stuff
     "offline": {
-        0: [1, 2, 3, 4, 5, 6]
+        0: [0, 1, 2, 3, 4, 5]
     },
     # need to increment every index by 1 in the dataset, since the 'background' class does not really exist
     # the 0 class is surface, which could be used as background, but here doesn't make sense
@@ -26,7 +32,7 @@ ICL_ISPRS = {
         1: [0, 2],       # surface (0), low veg. (2)
         2: [4]           # car (4)
     },
-    "1-5s": {
+    "6s": {
         0: [1],
         1: [3],
         2: [5],
@@ -172,32 +178,61 @@ class Task:
         shift = int(self.step == 0) * self.shift
         return len(self.task_dict[self.step]) + shift
 
-    def filter_images(self, dataset: DatasetBase, overlap: bool = True) -> List[bool]:
+    def filter_images(self, dataset: DatasetBase, mode: str = "overlap") -> List[bool]:
         """Iterates the given dataset, storing in a numpy array which image indices are fit
         for the current task. The fit criterion is defined with or without overlap.
         WITH OVERLAP (default): the image is kept when the mask contains one of the task labels,
                                 regardless of the other labels in the mask.
         WITHOUT OVERLAP: the image is kept when the mask contains one of the task labels AND
                          the other labels are ∈ old labels (i.e. does not include labels from future tasks)
+        WITH SPLIT: first, the dataset is divided into evenly sized chunks of N/num_classes samples each.
+                    Then, each chunk_i is assigned to class i, removing any tile that does not contain any pixel
+                    with label=i.
+                    The image is kept at step T if (and only if) it belongs to the chunk i and contains
+                    at least one pixel labeled as i, for each i in C_T, the set of current new classes.
 
         Args:
             dataset (DatasetBase): original dataset to be filtered
-            overlap (bool, optional): filter with or without overlap. Defaults to True.
+            overlap (str, optional): filter with overlap, without overlap, or splitting. Defaults to overlap.
 
         Returns:
             List[bool]: a list of bool values, one per image, where true means to keep it.
         """
-        cached_name = f"{self.task_name()}_{dataset.stage()}.npy"
+        assert mode in ("overlap", "noov", "split")
+        postfix = "" if mode == "overlap" else f"_{mode}"
+        cached_name = f"{self.task_name()}_{dataset.stage()}{postfix}.npy"
         cached_path = self.data_root / self.dataset_name / cached_name
         if cached_path.exists() and cached_path.is_file():
             filtered = np.load(cached_path)
         else:
             filtered = list()
-            filter_fn = filter_with_overlap if overlap else filter_without_overlap
-            # iterate dataset to decide which image to keep and which not
-            for _, mask in tqdm(dataset, desc=f"Creating {cached_name}"):
-                mask_indices = np.unique(mask)
-                filtered.append(filter_fn(mask_indices, self.new_labels, self.seen_labels))
+            if mode != "split":
+                # first select the right function for the filtering
+                # then iterate dataset to decide which image to keep and which not
+                filter_fn = filter_with_overlap if mode == "overlap" else filter_without_overlap
+                for _, mask in tqdm(dataset, desc=f"Creating {cached_name}"):
+                    mask_indices = np.unique(mask)
+                    filtered.append(filter_fn(mask_indices, self.new_labels, self.seen_labels))
+            else:
+                num_samples = len(dataset)
+                label2tile = defaultdict(list)
+                shuffled = random.sample(list(range(num_samples)), k=num_samples)
+                tile_counts = np.zeros(len(dataset.categories()))
+
+                for i in tqdm(shuffled):
+                    _, mask = dataset[i]
+                    available_labels = np.unique(mask)
+                    index = np.argmin(tile_counts[available_labels])
+                    label = available_labels[index]
+                    label2tile[label].append(i)
+                    tile_counts[label] += 1
+
+                filtered = [False] * len(dataset)
+                for label, tiles in label2tile.items():
+                    for index in tiles:
+                        filtered[index] = label in self.new_labels
+
+            # create a numpy array of indices, then store it to file
             filtered = np.array(filtered)
             cached_path = prepare_folder(cached_path.parent)
             np.save(str(cached_path / cached_name), filtered)

@@ -20,7 +20,7 @@ class ICLDataset(DatasetBase):
                  dataset: DatasetBase,
                  task: Task,
                  mask_value: int = 0,
-                 overlap: bool = True,
+                 filter_mode: str = "overlap",
                  mask_old: bool = True) -> None:
         super().__init__()
         self.dataset = dataset
@@ -37,10 +37,9 @@ class ICLDataset(DatasetBase):
         assert all([index in dataset.categories() for index in task.seen_labels]), \
             f"Label index out of bounds for dataset {dataset.name()}"
         # safe to proceed
-        self.overlap = overlap
         self.mask_value = mask_value
         self._has_background = dataset.has_background()
-        self.dataset.add_mask(task.filter_images(dataset, overlap=overlap))
+        self.dataset.add_mask(task.filter_images(dataset, mode=str(filter_mode)))
         # prepare lookup tables to transform from normal -> ICL indices
         # first shift labels if the background is not already included and set 0 as first
         new_labels = self._process_labels(task.new_labels)

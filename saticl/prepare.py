@@ -7,7 +7,7 @@ from torch import nn
 
 from saticl.config import Configuration, Metrics, ModelConfig, SSLConfiguration
 from saticl.datasets import create_dataset
-from saticl.datasets.icl import ICLDataset
+from saticl.datasets.base import DatasetBase
 from saticl.datasets.transforms import test_transforms, train_transforms
 from saticl.metrics import F1Score, IoU, Metric, lenient_argmax
 from saticl.models import create_decoder, create_encoder
@@ -22,7 +22,7 @@ from saticl.utils.ml import mask_set
 LOG = get_logger(__name__)
 
 
-def prepare_dataset(config: Configuration, include_transforms: bool = True) -> ICLDataset:
+def prepare_dataset(config: Configuration, include_transforms: bool = True) -> Tuple[DatasetBase, DatasetBase]:
     # instantiate transforms for training and evaluation
     # we keep them without norm and toTensor in case of contrastive regularization, so that we can transform later
     # after the ICL filtering, using the ContrastiveDataset wrapper
@@ -54,7 +54,7 @@ def prepare_dataset(config: Configuration, include_transforms: bool = True) -> I
         # In the first case (like this one), a portion of training is reserved for validation
         # In the second case, the validation becomes testing and the training is again split randomly
         train_mask, val_mask, _ = mask_set(len(train_dataset), val_size=config.val_size, test_size=0.0)
-        LOG.debug("Creating val. set from training, split: %d - %d", len(train_mask), len(val_mask))
+        LOG.debug("Creating val. set from training, split: %d - %d", sum(train_mask), sum(val_mask))
         val_dataset = create_dataset(config.dataset,
                                      path=data_root,
                                      subset="train",

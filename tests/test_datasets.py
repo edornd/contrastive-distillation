@@ -67,7 +67,7 @@ def test_dataset_potsdam_icl_step0(potsdam_path: Path):
     original_length = len(train_dataset)
 
     task = Task(dataset="potsdam", name="222a")
-    icl_set = ICLDataset(train_dataset, task, overlap=True)
+    icl_set = ICLDataset(train_dataset, task, filter_mode="overlap")
     # check it includes the previously missing background + handpicked check
     assert len(icl_set.categories()) == 7
     assert icl_set.categories()[1] == "impervious_surfaces"
@@ -103,7 +103,7 @@ def test_dataset_potsdam_icl_step1(potsdam_path: Path):
     original_length = len(train_dataset)
 
     task = Task(dataset="potsdam", name="222a", step=1, add_background=not train_dataset.has_background())
-    icl_set = ICLDataset(train_dataset, task, overlap=True)
+    icl_set = ICLDataset(train_dataset, task, filter_mode="overlap")
     # check it includes the previously missing background + handpicked check
     assert len(icl_set.categories()) == 7
     assert icl_set.categories()[1] == "impervious_surfaces"
@@ -139,7 +139,7 @@ def test_dataset_potsdam_icl_step2(potsdam_path: Path):
     original_length = len(train_dataset)
 
     task = Task(dataset="potsdam", name="222a", step=2)
-    icl_set = ICLDataset(train_dataset, task, overlap=True)
+    icl_set = ICLDataset(train_dataset, task, filter_mode="overlap")
     # check it includes the previously missing background + handpicked check
     assert len(icl_set.categories()) == 7
     assert icl_set.categories()[1] == "impervious_surfaces"
@@ -170,7 +170,7 @@ def test_dataset_potsdam_icl_step0_weights(potsdam_path: Path, potsdam_weights: 
     original_length = len(train_dataset)
 
     task = Task(dataset="potsdam", name="321", step=0)
-    icl_set = ICLDataset(train_dataset, task, overlap=True)
+    icl_set = ICLDataset(train_dataset, task, filter_mode="overlap")
     # check it includes the previously missing background + handpicked check
     assert len(icl_set.categories()) == 7
     assert icl_set.categories()[1] == "impervious_surfaces"
@@ -191,7 +191,7 @@ def test_dataset_potsdam_icl_step1_weights(potsdam_path: Path, potsdam_weights: 
     original_length = len(train_dataset)
 
     task = Task(dataset="potsdam", name="321", step=1)
-    icl_set = ICLDataset(train_dataset, task, overlap=True)
+    icl_set = ICLDataset(train_dataset, task, filter_mode="overlap")
     # check it includes the previously missing background + handpicked check
     assert len(icl_set.categories()) == 7
     assert icl_set.categories()[1] == "impervious_surfaces"
@@ -212,7 +212,7 @@ def test_dataset_potsdam_icl_step2_weights(potsdam_path: Path, potsdam_weights: 
     original_length = len(train_dataset)
 
     task = Task(dataset="potsdam", name="321", step=2)
-    icl_set = ICLDataset(train_dataset, task, overlap=True)
+    icl_set = ICLDataset(train_dataset, task, filter_mode="overlap")
     # check it includes the previously missing background + handpicked check
     assert len(icl_set.categories()) == 7
     assert icl_set.categories()[1] == "impervious_surfaces"

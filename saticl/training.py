@@ -92,8 +92,8 @@ def train(config: Configuration):
                 step=config.task.step,
                 add_background=add_background)
     train_mask, valid_mask = 0, 255
-    train_set = ICLDataset(dataset=train_set, task=task, mask_value=train_mask, overlap=config.task.overlap)
-    valid_set = ICLDataset(dataset=valid_set, task=task, mask_value=valid_mask, overlap=config.task.overlap)
+    train_set = ICLDataset(dataset=train_set, task=task, mask_value=train_mask, filter_mode=config.task.filter_mode)
+    valid_set = ICLDataset(dataset=valid_set, task=task, mask_value=valid_mask, filter_mode=config.task.filter_mode)
     # if we are in a contrastive regularization scenario, wrap the set once again
     # and add train transforms (which will be applied twice per image)
     if config.ce.aug_factor > 0:
@@ -254,8 +254,8 @@ def train_ssl(config: SSLConfiguration):
                 step=config.task.step,
                 add_background=add_background)
     train_mask, valid_mask = 0, 255
-    train_set = ICLDataset(dataset=train_set, task=task, mask_value=train_mask, overlap=config.task.overlap)
-    valid_set = ICLDataset(dataset=valid_set, task=task, mask_value=valid_mask, overlap=config.task.overlap)
+    train_set = ICLDataset(dataset=train_set, task=task, mask_value=train_mask, filter_mode=config.task.filter_mode)
+    valid_set = ICLDataset(dataset=valid_set, task=task, mask_value=valid_mask, filter_mode=config.task.filter_mode)
     train_loader = DataLoader(dataset=train_set,
                               batch_size=config.trainer.batch_size,
                               shuffle=True,

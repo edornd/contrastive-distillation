@@ -65,7 +65,13 @@ def test(test_config: TestConfiguration):
                 name=config.task.name,
                 step=config.task.step,
                 add_background=add_background)
-    test_set = ICLDataset(dataset=test_dataset, task=task, mask_value=0, overlap=config.task.overlap, mask_old=False)
+    # we are testing, thus we are interested in evaluating every tile
+    # the overlap mode allows to keep every tile with the current set of labels
+    test_set = ICLDataset(dataset=test_dataset,
+                          task=task,
+                          mask_value=0,
+                          filter_mode="overlap",
+                          mask_old=False)
     test_loader = DataLoader(dataset=test_set,
                              batch_size=test_config.trainer.batch_size,
                              shuffle=False,
@@ -203,7 +209,12 @@ def test_ssl(test_config: TestConfiguration):
                 name=config.task.name,
                 step=config.task.step,
                 add_background=add_background)
-    test_set = ICLDataset(dataset=test_dataset, task=task, mask_value=0, overlap=config.task.overlap, mask_old=False)
+    # during testing, we are interested in assessing every available tile
+    test_set = ICLDataset(dataset=test_dataset,
+                          task=task,
+                          mask_value=0,
+                          filter_mode="overlap",
+                          mask_old=False)
     test_loader = DataLoader(dataset=test_set,
                              batch_size=test_config.trainer.batch_size,
                              shuffle=False,

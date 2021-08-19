@@ -39,6 +39,12 @@ class ICLMethods(StringEnum):
     MIB = "MiB"
 
 
+class FilteringMode(StringEnum):
+    overlap = "overlap"
+    no_overlap = "noov"
+    split = "split"
+
+
 class Optimizers(CallableEnum):
     adam = Initializer(Adam)
     adamw = Initializer(AdamW)
@@ -162,7 +168,7 @@ class CEConfig(ObjectSettings):
 class TaskConfig(BaseSettings):
     name: str = Field(required=True, description="ICL task to perform")
     step: int = Field(0, description="Which step of the ICL pipeline")
-    overlap: bool = Field(True, description="Whether to use the overlap or non-overlap setting")
+    filter_mode: FilteringMode = Field(FilteringMode.overlap, description="How to filter out images at step T")
     step_checkpoint: Optional[str] = Field(None, description="Manual override for the checkpoint of the prev.step")
 
 
@@ -202,7 +208,7 @@ class Configuration(BaseSettings):
     # dataset options
     data_root: str = Field(required=True, description="Path to the dataset")
     dataset: Datasets = Field(Datasets.potsdam, description="Name of the dataset")
-    has_val: bool = Field(True, description="True when an ad-hoc val set is present (usually False)")
+    has_val: bool = Field(False, description="True when an ad-hoc val set is present (usually False)")
     val_size: float = Field(0.1, description="Portion of train set to use for validation")
     # ML options
     model: ModelConfig = ModelConfig()
