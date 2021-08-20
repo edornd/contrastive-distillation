@@ -15,7 +15,9 @@ from torch.utils.data import DataLoader
 
 from saticl.logging import BaseLogger
 from saticl.logging.empty import EmptyLogger
+from saticl.losses.regularization import MultiModalScaling
 from saticl.metrics import Metric
+from saticl.models.encoders import MultiEncoder
 from saticl.tasks import Task
 from saticl.utils.common import get_logger, progressbar
 from saticl.utils.decorators import get_rank
@@ -65,6 +67,8 @@ class Trainer:
         self.criterion_kde = kde_criterion
         self.kdd_lambda = kdd_lambda
         self.kde_lambda = kde_lambda
+        self.multimodal = isinstance(new_model.encoder, MultiEncoder)
+        self.criterion_mmd = MultiModalScaling()
         # optimizer, scheduler and logger, scaler for AMP
         self.optimizer = optimizer
         self.scheduler = scheduler
@@ -226,7 +230,6 @@ class Trainer:
             # backward pass
             self.accelerator.backward(loss)
             self.optimizer.step()
-            self.scheduler.step()
             # measure elapsed time
             elapsed = (time.time() - start)
             # store training info
@@ -323,6 +326,8 @@ class Trainer:
             try:
                 self.train_epoch_start()
                 t_losses, t_times = self.train_epoch(epoch=self.current_epoch, train_dataloader=train_dataloader)
+                # not the best place to call it, but it's best to call it every epoch instead of iteration
+                self.scheduler.step()
                 self.train_epoch_end(t_losses, t_times)
 
                 if val_dataloader is not None:

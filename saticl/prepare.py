@@ -85,10 +85,11 @@ def create_multi_encoder(name_rgb: str, name_ir: str, config: ModelConfig, **kwa
                                decoder=config.decoder,
                                pretrained=config.pretrained,
                                freeze=config.freeze,
-                               output_stride=config.output_stride,
+                               output_stride=None,   # somehow, with this we obtain the same reductions of TResNet
                                act_layer=config.act,
                                norm_layer=config.norm,
-                               channels=1)
+                               channels=1,
+                               auxiliary=name_rgb)
     return MultiEncoder(encoder_a, encoder_b, act_layer=config.act, norm_layer=config.norm, **kwargs)
 
 
@@ -108,6 +109,7 @@ def prepare_model(config: Configuration, task: Task) -> nn.Module:
                                  norm_layer=cfg.norm,
                                  channels=config.in_channels)
     elif len(enc_names) == 2:
+        LOG.info("Creating a multimodal encoder (%s, %s)", enc_names[0], enc_names[1])
         encoder = create_multi_encoder(name_rgb=enc_names[0],
                                        name_ir=enc_names[1],
                                        config=cfg,

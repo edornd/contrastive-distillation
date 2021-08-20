@@ -14,20 +14,25 @@ class Regularizer(nn.Module):
 
 class MultiModalScaling(Regularizer):
 
-    def __init__(self, reduction: str = "mean", axes: tuple = (-2, -1)) -> None:
+    def __init__(self, reduction: str = "mean") -> None:
         super().__init__()
         self.reduction = reductions.get(reduction, torch.mean)
-        self.axes = axes
+        self.pooling = nn.AdaptiveAvgPool2d(1)
+        self.flatten = nn.Flatten()
 
     def forward(self, rgb_features: List[Tensor], ir_features: List[Tensor], **kwargs) -> Any:
         # they should have shape [batch, channels, h, w].
         # we are interested in keeping the channels coherent, so we reduce H and W
-        regularizations = []
-        for rgb, ir in zip(rgb_features, ir_features):
-            reduced_rgb = self.reduction(rgb, dim=self.axes)
-            reduced_ir = self.reduction(ir, dim=self.axes)
-            regularizations.append(norm(reduced_rgb) - norm(reduced_ir))
-        return sum(regularizations)
+        result = torch.tensor(0.0, device=rgb_features[0].device)
+        # construct a list of weights, one per feature map, weigh more at the bottom
+        num_layers = len(rgb_features)
+        weights = [(i / num_layers)**self.gamma for i in range(1, num_layers + 1)]
+        for rgb, ir, w in zip(rgb_features, ir_features, weights):
+            reduced_rgb = self.flatten(self.pooling(rgb))
+            reduced_ir = self.flatten(self.pooling(ir))
+            diff = norm(reduced_rgb) - norm(reduced_ir)
+            result += w * diff
+        return result
 
 
 class AugmentationInvariance(Regularizer):

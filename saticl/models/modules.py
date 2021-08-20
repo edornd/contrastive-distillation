@@ -205,7 +205,7 @@ class SSMA(nn.Module):
         self.bottleneck = nn.Sequential(nn.Conv2d(total_chs, bottleneck_chs, kernel_size=3, padding=1, bias=False),
                                         norm_layer(bottleneck_chs), act_layer(),
                                         nn.Conv2d(bottleneck_chs, total_chs, kernel_size=3, padding=1, bias=False),
-                                        norm_layer(total_chs), act_layer())
+                                        norm_layer(total_chs), nn.Sigmoid())
         # the output is given by the RGB network, which is supposed to be bigger
         # also, this allows for easier integration with decoders
         self.out_bn = norm_layer(total_chs)
@@ -214,7 +214,8 @@ class SSMA(nn.Module):
     def forward(self, rgb: torch.Tensor, ir: torch.Tensor) -> torch.Tensor:
         x1 = torch.cat((rgb, ir), dim=1)
         x = self.bottleneck(x1)
-        x = self.out_bn(x1 + x)
+        recalibrated = x1 * x
+        x = self.out_bn(recalibrated)
         return self.out_conv(x)
 
 

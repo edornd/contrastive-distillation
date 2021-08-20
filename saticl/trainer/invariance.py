@@ -91,25 +91,36 @@ class AugInvarianceTrainer(Trainer):
         full_y = torch.cat((y1, y2), dim=0).long()
         # forward and loss on segmentation task
         with self.accelerator.autocast():
-            split = x1.size(0)
+            split = len(x1)
             new_out, new_features = self.model(full_x)
-            # if self.temperature:
-            #     new_out /= self.temperature
             seg_loss = self.criterion(new_out, full_y)
+            # initialize tensors for auxiliary losses, if any
+            rot_loss = torch.tensor(0, device=seg_loss.device, dtype=seg_loss.dtype)
+            kdd_loss = torch.tensor(0, device=seg_loss.device, dtype=seg_loss.dtype)
+            mmd_loss = torch.tensor(0, device=seg_loss.device, dtype=seg_loss.dtype)
+            # handle multimodal output, if any
+            if self.multimodal:
+                enc_out = new_features["out"]
+                rgb_out = new_features["rgb"]
+                ir_out = new_features["ir"]
+                mmd_loss = self.criterion_mmd(rgb_out, ir_out)
+                # do stuff here
+            else:
+                enc_out = new_features
             # rotation invariance loss
             # since we are feeding the same images augmented twice, the output features contain both
             # and we need to split in the middle, at 'split' size
-            enc1 = [f[:split] for f in new_features[-self.aug_layers:]]
-            enc2 = [f[split:] for f in new_features[-self.aug_layers:]]
-            rot_loss = self.aug_lambda * self.criterion_aug(enc1, enc2)
+            if self.aug_lambda > 0:
+                enc1 = [enc_out[-1][:split]]
+                enc2 = [enc_out[-1][split:]]
+                rot_loss = self.aug_lambda * self.criterion_aug(enc1, enc2)
             # knowledge distillation from the old model
             # this only has effect from step 1 onwards
-            kdd_loss = torch.tensor(0, device=seg_loss.device, dtype=seg_loss.dtype)
             if self.task.step > 0:
                 old_out, _ = self.old_model(full_x)
                 kdd_loss = self.kdd_lambda * self.criterion_kdd(new_out, old_out)
             # sum up losses
-            total = seg_loss + kdd_loss + rot_loss
+            total = seg_loss + kdd_loss + rot_loss + mmd_loss
         # gather and update metrics
         # we group only the 'standard' images, not the rotated ones
         y_true = self.accelerator.gather(full_y)
@@ -118,4 +129,10 @@ class AugInvarianceTrainer(Trainer):
         # debug if active
         if self.debug:
             self._debug_training(x=x1.dtype, y=y1.dtype, pred=new_out.dtype, seg_loss=seg_loss, kdd_loss=kdd_loss)
-        return {"tot_loss": total, "seg_loss": seg_loss, "kdd_loss": kdd_loss, "rot_loss": rot_loss}
+        return {
+            "tot_loss": total,
+            "seg_loss": seg_loss,
+            "kdd_loss": kdd_loss,
+            "rot_loss": rot_loss,
+            "mmd_loss": mmd_loss
+        }

@@ -26,10 +26,13 @@ def identity(*args: Any) -> Any:
     return args
 
 
-def seed_everything(seed: int) -> None:
+def seed_everything(seed: int, deterministic: bool = True) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def seed_worker(worker_id: int):

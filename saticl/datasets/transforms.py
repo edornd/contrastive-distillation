@@ -143,13 +143,13 @@ def train_transforms(image_size: int,
                      tensorize: bool = True,
                      compose: bool = True):
     # alb.ChannelDropout(p=0.5, fill_value=0),
-    min_crop = image_size // 4 * 3
+    min_crop = image_size // 2
     max_crop = image_size
     transforms = [
+        alb.ElasticTransform(alpha=1, sigma=30, alpha_affine=30),
         alb.RandomSizedCrop(min_max_height=(min_crop, max_crop), height=image_size, width=image_size, p=0.8),
         alb.Flip(p=0.5),
         alb.RandomRotate90(p=0.5),
-        alb.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.5, rotate_limit=90, p=0.5),
         alb.RandomBrightnessContrast(p=0.5),
     ]
     if channel_dropout > 0:

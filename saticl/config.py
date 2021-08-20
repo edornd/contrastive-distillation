@@ -53,8 +53,8 @@ class Optimizers(CallableEnum):
 
 class Schedulers(CallableEnum):
     plateau = Initializer(ReduceLROnPlateau)
-    exp = Initializer(ExponentialLR, gamma=0.9)
-    cosine = Initializer(CosineAnnealingLR, T_max=50)
+    exp = Initializer(ExponentialLR, gamma=0.95)
+    cosine = Initializer(CosineAnnealingLR, T_max=10)
 
 
 class Losses(CallableEnum):
@@ -71,7 +71,7 @@ class Losses(CallableEnum):
 class UnbiasLosses(CallableEnum):
     crossent = UnbiasedCrossEntropy
     focal = UnbiasedFocalLoss
-    tverksy = UnbiasedFTLoss
+    tversky = UnbiasedFTLoss
     tanimoto = TanimotoLoss
     compl = DualTanimotoLoss
 
@@ -102,7 +102,7 @@ class TrainerConfig(BaseSettings):
     num_workers: int = Field(8, description="Number of workers per dataloader")
     max_epochs: int = Field(100, description="How many epochs")
     monitor: Metrics = Field(Metrics.f1, description="Metric to be monitored")
-    patience: int = Field(20, description="Amount of epochs without improvement in the monitored metric")
+    patience: int = Field(25, description="Amount of epochs without improvement in the monitored metric")
     validate_every: int = Field(1, description="How many epochs between validation rounds")
     temperature: float = Field(2.0, description="Temperature for simulated annealing, >= 1")
     temp_epochs: int = Field(20, description="How many epochs before T goes back to 1")
@@ -122,7 +122,7 @@ class OptimizerConfig(ObjectSettings):
 
 
 class SchedulerConfig(ObjectSettings):
-    target: Schedulers = Field(Schedulers.cosine, description="Which scheduler to apply")
+    target: Schedulers = Field(Schedulers.exp, description="Which scheduler to apply")
 
     def instantiate(self, *args, **kwargs) -> Any:
         return self.target(*args, **kwargs)
