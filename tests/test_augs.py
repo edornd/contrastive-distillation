@@ -9,15 +9,14 @@ from albumentations.pytorch import ToTensorV2
 from matplotlib import pyplot as plt
 from saticl.datasets import create_dataset
 from saticl.datasets.transforms import (
-    ContrastiveTransform,
-    Denormalize,
-    ModalityDropout,
     geom_transforms,
+    invariance_transforms,
     ssl_transforms,
     test_transforms,
     train_transforms,
 )
 from saticl.datasets.wrappers import ContrastiveDataset, SSLDataset
+from saticl.transforms import ContrastiveTransform, Denormalize, ModalityDropout
 from saticl.utils.ml import mask_set, mask_to_rgb, seed_everything
 from tqdm import tqdm
 
@@ -173,3 +172,46 @@ def test_icl_val_display_potsdam(potsdam_path: Path):
         plt.tight_layout()
         plt.savefig(f"{str(results_path)}/{i:4d}-full.png")
         plt.close(fig)
+
+
+def test_invariance_transforms(potsdam_path: Path):
+    # instantiate transforms for training
+    seed_everything(1337)
+    mean = (0.485, 0.456, 0.406)
+    std = (0.229, 0.224, 0.225),
+    train_transform = alb.Compose([alb.Normalize(mean=mean, std=std), ToTensorV2()])
+    dataset = create_dataset("potsdam", path=potsdam_path, subset="train", transform=train_transform, channels=3)
+    inv_transforms = invariance_transforms()
+
+    denorm = Denormalize()
+    n_images = 16
+    values = np.random.choice(len(dataset), size=n_images, replace=False)
+    samples = [dataset.__getitem__(i) for i in values]
+    nrows = int(np.sqrt(n_images))
+    width = 4
+    ncols = nrows * width    # account for two images, same and rotated
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10 * width, 10))
+
+    for r in range(nrows):
+        for c in range(ncols // width):
+            index = r * nrows + c
+            # retrieve images and denormalize them, channels IRRG
+            img1, mask1 = samples[index]
+            img2, mask2 = inv_transforms(img1.unsqueeze(0), label=mask1.unsqueeze(0))
+            img2 = img2.squeeze(0)
+            mask2 = mask2.squeeze(0)
+            img1 = denorm(img1)
+            img2 = denorm(img2)
+            # plot images
+            axes[r, c * width].imshow(img1)
+            axes[r, c * width].set_title("x1")
+            axes[r, c * width + 1].imshow(mask1)
+            axes[r, c * width + 1].set_title("y1")
+            axes[r, c * width + 2].imshow(img2)
+            axes[r, c * width + 2].set_title("x2")
+            axes[r, c * width + 3].imshow(mask2)
+            axes[r, c * width + 3].set_title("y2")
+
+    plt.tight_layout()
+    plt.savefig("data/invariance_set.png")
+    plt.close(fig)

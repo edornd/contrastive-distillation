@@ -22,12 +22,12 @@ from saticl.utils.ml import mask_set
 LOG = get_logger(__name__)
 
 
-def prepare_dataset(config: Configuration, include_transforms: bool = True) -> Tuple[DatasetBase, DatasetBase]:
+def prepare_dataset(config: Configuration, partial_transforms: bool = True) -> Tuple[DatasetBase, DatasetBase]:
     # instantiate transforms for training and evaluation
     # we keep them without norm and toTensor in case of contrastive regularization, so that we can transform later
     # after the ICL filtering, using the ContrastiveDataset wrapper
     data_root = Path(config.data_root)
-    if config.ce.aug_factor > 0 and include_transforms:
+    if partial_transforms:
         train_transform = train_transforms(image_size=config.image_size,
                                            in_channels=config.in_channels,
                                            channel_dropout=config.channel_drop,

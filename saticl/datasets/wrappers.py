@@ -3,7 +3,7 @@ from typing import Any, Dict, List
 import torch
 
 from saticl.datasets.base import DatasetBase
-from saticl.datasets.transforms import ContrastiveTransform, SSLTransform
+from saticl.transforms import ContrastiveTransform, SSLTransform
 
 
 class SSLDataset(DatasetBase):

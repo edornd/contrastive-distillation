@@ -146,7 +146,6 @@ class CEConfig(ObjectSettings):
     beta: float = Field(0.4, description="Beta param. for Tversky loss (0.5 foor Dice)")
     gamma: float = Field(2.0, description="Gamma param. for focal loss (1.0 for standard CE)")
     aug_factor: float = Field(0.0, description="Multiplier for the augmentation invariance regularization")
-    aug_layers: int = Field(1, description="How many layers to regularize, starting from the bottom")
 
     def instantiate(self, *args, **kwargs) -> Any:
         assert "ignore_index" in kwargs, "Ignore index required"

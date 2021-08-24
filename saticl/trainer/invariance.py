@@ -8,6 +8,7 @@ from torch.optim import Optimizer
 
 from saticl.logging import BaseLogger
 from saticl.logging.console import DistributedLogger
+from saticl.losses.regularization import AugmentationInvariance
 from saticl.metrics import Metric
 from saticl.tasks import Task
 from saticl.trainer.base import Trainer, TrainerStage
@@ -29,11 +30,10 @@ class AugInvarianceTrainer(Trainer):
                  seg_criterion: nn.Module,
                  kdd_criterion: nn.Module,
                  kde_criterion: nn.Module = None,
-                 aug_criterion: nn.Module = None,
+                 aug_criterion: AugmentationInvariance = None,
                  kdd_lambda: float = 0.0,
                  kde_lambda: float = 0.0,
                  aug_lambda: float = 0.0,
-                 aug_layers: int = 1,
                  temperature: float = 4.0,
                  temp_epochs: int = 20,
                  train_metrics: Dict[str, Metric] = None,
@@ -61,12 +61,8 @@ class AugInvarianceTrainer(Trainer):
                          samples=samples,
                          stage=stage,
                          debug=debug)
-        layers = max(len(self.model.encoder.feature_info.channels()), aug_layers)
-        if layers < aug_layers:
-            LOG.warn("The number of proposed layers (%d) exceeds the available ones (%d)", aug_layers, layers)
-        self.criterion_aug = aug_criterion
+        self.regularizer = aug_criterion
         self.aug_lambda = aug_lambda
-        self.aug_layers = layers
         self.temperature = temperature
         self.temp_epochs = temp_epochs
 
@@ -86,53 +82,54 @@ class AugInvarianceTrainer(Trainer):
 
     def train_batch(self, batch: Any) -> torch.Tensor:
         # init losses and retrieve x, y
-        x1, x2, y1, y2 = batch
-        full_x = torch.cat((x1, x2), dim=0)
-        full_y = torch.cat((y1, y2), dim=0).long()
+        x, y = batch
         # forward and loss on segmentation task
         with self.accelerator.autocast():
-            split = len(x1)
-            new_out, new_features = self.model(full_x)
-            seg_loss = self.criterion(new_out, full_y)
-            # initialize tensors for auxiliary losses, if any
-            rot_loss = torch.tensor(0, device=seg_loss.device, dtype=seg_loss.dtype)
-            kdd_loss = torch.tensor(0, device=seg_loss.device, dtype=seg_loss.dtype)
-            mmd_loss = torch.tensor(0, device=seg_loss.device, dtype=seg_loss.dtype)
+            rot_loss = torch.tensor(0.0, device=self.accelerator.device)
+            kdd_loss = torch.tensor(0.0, device=self.accelerator.device)
+            logits, features = self.model(x)
+            tensors = [x, features]
             # handle multimodal output, if any
             if self.multimodal:
-                enc_out = new_features["out"]
-                rgb_out = new_features["rgb"]
-                ir_out = new_features["ir"]
-                mmd_loss = self.criterion_mmd(rgb_out, ir_out)
-                # do stuff here
-            else:
-                enc_out = new_features
-            # rotation invariance loss
-            # since we are feeding the same images augmented twice, the output features contain both
-            # and we need to split in the middle, at 'split' size
-            if self.aug_lambda > 0:
-                enc1 = [enc_out[-1][:split]]
-                enc2 = [enc_out[-1][split:]]
-                rot_loss = self.aug_lambda * self.criterion_aug(enc1, enc2)
+                raise NotImplementedError("Not working on it")
             # knowledge distillation from the old model
             # this only has effect from step 1 onwards
             if self.task.step > 0:
-                old_out, _ = self.old_model(full_x)
-                kdd_loss = self.kdd_lambda * self.criterion_kdd(new_out, old_out)
+                old_logits, old_features = self.old_model(x)
+                kdd_loss = self.criterion_kdd(logits, old_logits)
+                kdd_loss = self.kdd_lambda * torch.nan_to_num(kdd_loss, nan=0.0)
+                tensors.append(old_features)
+            # rotation/augmentation invariance:
+            # z1 = f1(rot(x))
+            # z2 = rot(f2(x))
+            # f1 = new model, f2 = new model for step 0, old model in incremental setups
+            if self.aug_lambda > 0:
+                tensors_rot, y_rot = self.regularizer.apply_transform(*tensors, label=y)
+                rot_x, rot_f = tensors_rot[0], tensors_rot[1]
+                # compute forward on rotated image, merge rotated and non-rotated for segmentation
+                rot_logits, f_rot = self.model(rot_x)
+                logits = torch.cat((logits, rot_logits), axis=0)
+                y = torch.cat((y, y_rot), axis=0)
+                # compute rotation/augmentation invariance loss
+                # incremental: rot(old_model(x)) <-> new_model(rot(x))
+                rot_loss = self.aug_lambda * torch.nan_to_num(self.regularizer(rot_f, f_rot), nan=0.0)
+                if len(tensors_rot) > 2:
+                    old_rot_loss = torch.nan_to_num(self.regularizer(f_rot, tensors_rot[-1]), nan=0.0)
+                    rot_loss = self.aug_lambda * 0.5 * old_rot_loss
             # sum up losses
-            total = seg_loss + kdd_loss + rot_loss + mmd_loss
+            seg_loss = self.criterion(logits, y)
+            total = seg_loss + kdd_loss + rot_loss
         # gather and update metrics
         # we group only the 'standard' images, not the rotated ones
-        y_true = self.accelerator.gather(full_y)
-        y_pred = self.accelerator.gather(new_out)
+        y_true = self.accelerator.gather(y)
+        y_pred = self.accelerator.gather(logits)
         self._update_metrics(y_true=y_true, y_pred=y_pred, stage=TrainerStage.train)
         # debug if active
         if self.debug:
-            self._debug_training(x=x1.dtype, y=y1.dtype, pred=new_out.dtype, seg_loss=seg_loss, kdd_loss=kdd_loss)
-        return {
-            "tot_loss": total,
-            "seg_loss": seg_loss,
-            "kdd_loss": kdd_loss,
-            "rot_loss": rot_loss,
-            "mmd_loss": mmd_loss
-        }
+            self._debug_training(x=x.dtype,
+                                 y=y.dtype,
+                                 pred=logits.dtype,
+                                 seg_loss=seg_loss,
+                                 kdd_loss=kdd_loss,
+                                 rot_loss=rot_loss)
+        return {"tot_loss": total, "seg_loss": seg_loss, "kdd_loss": kdd_loss, "rot_loss": rot_loss}

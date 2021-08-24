@@ -13,7 +13,7 @@ from torch import nn
 import seaborn as sns
 from matplotlib import pyplot as plt
 from pydantic.env_settings import BaseSettings
-from saticl.datasets.transforms import Denormalize
+from saticl.transforms import Denormalize
 from saticl.utils import common as utils
 from timm.models.tresnet import SpaceToDepthModule
 from torchsummary import summary

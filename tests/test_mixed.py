@@ -2,7 +2,8 @@ import numpy as np
 import torch
 
 from PIL import Image
-from saticl.datasets.transforms import Denormalize, train_transforms
+from saticl.datasets.transforms import train_transforms
+from saticl.transforms import Denormalize
 from saticl.utils.ml import make_grid
 
 

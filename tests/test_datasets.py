@@ -9,9 +9,10 @@ from albumentations.pytorch import ToTensorV2
 from saticl.datasets import create_dataset
 from saticl.datasets.icl import ICLDataset
 from saticl.datasets.isprs import PotsdamDataset
-from saticl.datasets.transforms import ContrastiveTransform, geom_transforms, test_transforms, train_transforms
+from saticl.datasets.transforms import geom_transforms, test_transforms, train_transforms
 from saticl.datasets.wrappers import ContrastiveDataset
 from saticl.tasks import Task
+from saticl.transforms import ContrastiveTransform
 from saticl.utils.ml import mask_set, seed_everything
 from tqdm import tqdm
 

@@ -8,8 +8,8 @@ from torch.utils.data import DataLoader
 
 from saticl.config import Configuration, SSLConfiguration
 from saticl.datasets.icl import ICLDataset
-from saticl.datasets.transforms import ContrastiveTransform, geom_transforms, inverse_transform, ssl_transforms
-from saticl.datasets.wrappers import ContrastiveDataset, SSLDataset
+from saticl.datasets.transforms import invariance_transforms, inverse_transform, ssl_transforms
+from saticl.datasets.wrappers import SSLDataset
 from saticl.logging.tensorboard import TensorBoardLogger
 from saticl.losses.regularization import AugmentationInvariance
 from saticl.models.icl import ICLSegmenter
@@ -83,7 +83,7 @@ def train(config: Configuration):
     seed_everything(config.seed)
     # prepare datasets
     LOG.info("Loading datasets...")
-    train_set, valid_set = prepare_dataset(config=config, include_transforms=True)
+    train_set, valid_set = prepare_dataset(config=config, partial_transforms=False)
     LOG.info("Full sets - train set: %d samples, validation set: %d samples", len(train_set), len(valid_set))
 
     add_background = not train_set.has_background()
@@ -94,14 +94,7 @@ def train(config: Configuration):
     train_mask, valid_mask = 0, 255
     train_set = ICLDataset(dataset=train_set, task=task, mask_value=train_mask, filter_mode=config.task.filter_mode)
     valid_set = ICLDataset(dataset=valid_set, task=task, mask_value=valid_mask, filter_mode=config.task.filter_mode)
-    # if we are in a contrastive regularization scenario, wrap the set once again
-    # and add train transforms (which will be applied twice per image)
-    if config.ce.aug_factor > 0:
-        LOG.info("Wrapping into contrastive-based dataset")
-        # we pass the same transform, which will be applied twice for two different results from the same img
-        extra = geom_transforms(in_channels=config.in_channels, normalize=True, tensorize=True, compose=True)
-        train_set = ContrastiveDataset(train_set, transform=ContrastiveTransform(transform_a=extra, transform_b=extra))
-        config.model.transforms += str(extra)
+
     # construct data loaders
     train_loader = DataLoader(dataset=train_set,
                               batch_size=config.trainer.batch_size,
@@ -167,9 +160,8 @@ def train(config: Configuration):
     trainer_class = Trainer
     kwargs = dict()
     if config.ce.aug_factor > 0:
-        kwargs.update(aug_criterion=AugmentationInvariance(gamma=2.0),
+        kwargs.update(aug_criterion=AugmentationInvariance(transform=invariance_transforms()),
                       aug_lambda=config.ce.aug_factor,
-                      aug_layers=config.ce.aug_layers,
                       temperature=config.trainer.temperature,
                       temp_epochs=config.trainer.temp_epochs)
         trainer_class = AugInvarianceTrainer

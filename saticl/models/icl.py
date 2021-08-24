@@ -61,7 +61,7 @@ class ICLSegmenter(nn.Module):
         decoder_in = encoder_out["out"] if self.multimodal else encoder_out
         decoder_out = self.decoder(decoder_in)
         head_out = torch.cat([head(decoder_out) for head in self.classifiers], dim=1)
-        return head_out, encoder_out
+        return head_out, decoder_out
 
     def forward(self, inputs: Tuple[torch.Tensor, ...]) -> Tuple[torch.Tensor, ...]:
         out, features = self.forward_features(inputs)

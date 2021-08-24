@@ -55,10 +55,7 @@ class MultiEncoder(Encoder):
         out_features = []
         for module, rgb, ir in zip(self.ssmas, rgb_features, ir_features):
             out_features.append(module(rgb, ir))
-        result = {"out": out_features}
-        if self.return_features:
-            result.update(rgb=rgb_features, ir=ir_features)
-        return result
+        return out_features
 
 
 # just a simple wrapper to include custom encoders into the list, if required
