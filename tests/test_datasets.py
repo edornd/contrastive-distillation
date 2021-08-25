@@ -67,10 +67,8 @@ def test_dataset_isaid(isaid_path: Path):
 
 
 def test_dataset_isaid_transform(isaid_path: Path):
-    transforms = alb.Compose(
-        [alb.Normalize(mean=(0.485, 0.456, 0.406, 0.485), std=(0.229, 0.224, 0.225, 0.229)),
-         ToTensorV2()])
-    dataset = PotsdamDataset(isaid_path, subset="train", transform=transforms)
+    transforms = alb.Compose([alb.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)), ToTensorV2()])
+    dataset = ISAIDDataset(isaid_path, subset="train", transform=transforms)
     assert len(dataset.categories()) == 16
     assert dataset.has_background()
     for image, mask in tqdm(dataset):

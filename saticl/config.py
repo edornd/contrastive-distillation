@@ -196,6 +196,12 @@ class SSLModelConfig(ModelConfig):
     pretext_classes: int = Field(4, description="How many classes for the SSL task, typically 4 for rotation")
 
 
+class AugInvarianceConfig(BaseSettings):
+    factor: float = Field(0.0, description="Multiplier for the augmentation invariance regularization")
+    flip: bool = Field(True, description="Whether to include random flipping as augmentation")
+    fixed_angles: bool = Field(True, description="Whether to rotate of multiples of 90 or freely")
+
+
 class Configuration(BaseSettings):
     seed: int = Field(1337, description="Random seed for deterministic runs")
     image_size: int = Field(512, description="Size of the input images")
@@ -215,6 +221,7 @@ class Configuration(BaseSettings):
     scheduler: SchedulerConfig = SchedulerConfig()
     kd: KDConfig = KDConfig()
     ce: CEConfig = CEConfig()
+    aug: AugInvarianceConfig = AugInvarianceConfig()
     # method options and regularizations
     task: TaskConfig = TaskConfig(name="")
     method: ICLMethods = Field(ICLMethods.MIB, description="Which incremental learning method to use"

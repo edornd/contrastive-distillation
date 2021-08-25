@@ -128,7 +128,7 @@ def prepare_model(config: Configuration, task: Task) -> nn.Module:
                              norm_layer=cfg.norm,
                              **additional_args)
     # extract intermediate features when encoder KD is required
-    extract_features = config.kd.encoder_factor > 0 or config.ce.aug_factor > 0
+    extract_features = config.kd.encoder_factor > 0 or config.aug.factor > 0
     LOG.info("Returning intermediate features: %s", str(extract_features))
     icl_model = ICLSegmenter(encoder, decoder, classes=task.num_classes_per_task(), return_features=extract_features)
     return icl_model

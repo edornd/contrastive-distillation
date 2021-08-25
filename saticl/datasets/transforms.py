@@ -2,7 +2,16 @@ from typing import List
 
 import albumentations as alb
 from albumentations.pytorch import ToTensorV2
-from saticl.transforms import Compose, Denormalize, FixedRotationTransform, ModalityDropout, RandomFlip, SSLTransform
+from saticl.config import AugInvarianceConfig
+from saticl.transforms import (
+    Compose,
+    Denormalize,
+    FixedRotation,
+    ModalityDropout,
+    RandomFlip,
+    RandomRotation,
+    SSLTransform,
+)
 
 
 def adapt_channels(mean: tuple, std: tuple, in_channels: int = 3, copy_channel: int = 0):
@@ -57,8 +66,15 @@ def inverse_transform(mean: tuple = (0.485, 0.456, 0.406), std: tuple = (0.229, 
     return Denormalize(mean=mean, std=std)
 
 
-def invariance_transforms():
-    return Compose([RandomFlip(p=0.5), FixedRotationTransform(p=1.0)])
+def invariance_transforms(config: AugInvarianceConfig):
+    transforms = []
+    if config.flip:
+        transforms.append(RandomFlip(p=0.5))
+    if config.fixed_angles:
+        transforms.append(FixedRotation(p=1.0))
+    else:
+        transforms.append(RandomRotation(p=1.0, angles=360))
+    return Compose(transforms)
 
 
 def geom_transforms(base: List[alb.BasicTransform] = None,

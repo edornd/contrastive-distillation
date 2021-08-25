@@ -32,7 +32,7 @@ class Transform:
 
 
 class RandomFlip(Transform):
-    """Horizontally flip the given PIL Image randomly with a given probability.
+    """Horizontally flip the given images randomly with a given probability.
     """
 
     def __init__(self, p: float = 0.5) -> None:
@@ -50,7 +50,10 @@ class RandomFlip(Transform):
         return images
 
 
-class FixedRotationTransform(Transform):
+class FixedRotation(Transform):
+    """Rotates the given images and optional label by multiples of 90 degrees.
+    Useful to avoid empty pixels.
+    """
 
     def __init__(self,
                  p: float = 0.5,
@@ -69,6 +72,35 @@ class FixedRotationTransform(Transform):
             images = [func.rotate(img, angle, interpolation=self.interp) for img in images]
             if label is not None:
                 label = func.rotate(label, angle, interpolation=InterpolationMode.NEAREST)
+                return images, label
+            return images
+        else:
+            if label is not None:
+                return images, label
+            return images
+
+
+class RandomRotation(Transform):
+    """Rotates the given tensors by a random angle, in the given range.
+    """
+
+    def __init__(self,
+                 p: float = 0.5,
+                 angles: Union[int, tuple] = 360,
+                 interpolation: InterpolationMode = InterpolationMode.BILINEAR):
+        # always applied,
+        super().__init__(p)
+        if isinstance(angles, int):
+            angles = (-angles, angles)
+        self.min, self.max = angles
+        self.interp = interpolation
+
+    def __call__(self, *images: torch.Tensor, label: torch.Tensor = None):
+        if random.random() < self.p:
+            angle = random.randint(self.min, self.max)
+            images = [func.rotate(img, angle, interpolation=self.interp, fill=0) for img in images]
+            if label is not None:
+                label = func.rotate(label, angle, interpolation=InterpolationMode.NEAREST, fill=0)
                 return images, label
             return images
         else:

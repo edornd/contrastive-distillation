@@ -159,9 +159,9 @@ def train(config: Configuration):
     # choose trainer class depending on task or regularization
     trainer_class = Trainer
     kwargs = dict()
-    if config.ce.aug_factor > 0:
-        kwargs.update(aug_criterion=AugmentationInvariance(transform=invariance_transforms()),
-                      aug_lambda=config.ce.aug_factor,
+    if config.aug.factor > 0:
+        kwargs.update(aug_criterion=AugmentationInvariance(transform=invariance_transforms(config.aug)),
+                      aug_lambda=config.aug.factor,
                       temperature=config.trainer.temperature,
                       temp_epochs=config.trainer.temp_epochs)
         trainer_class = AugInvarianceTrainer
