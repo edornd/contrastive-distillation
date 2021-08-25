@@ -8,6 +8,7 @@ import albumentations as alb
 from albumentations.pytorch import ToTensorV2
 from saticl.datasets import create_dataset
 from saticl.datasets.icl import ICLDataset
+from saticl.datasets.isaid import ISAIDDataset
 from saticl.datasets.isprs import PotsdamDataset
 from saticl.datasets.transforms import geom_transforms, test_transforms, train_transforms
 from saticl.datasets.wrappers import ContrastiveDataset
@@ -52,6 +53,31 @@ def test_dataset_potsdam_ir_transform(potsdam_path: Path):
     assert mask.shape == (512, 512)
     assert image.min() >= -100 and image.max() <= +100
     assert mask.min() >= 0 and mask.max() <= 5
+
+
+def test_dataset_isaid(isaid_path: Path):
+    dataset = ISAIDDataset(isaid_path, subset="train", transform=None, channels=3)
+    assert len(dataset.categories()) == 16
+    image, mask = dataset.__getitem__(0)
+    assert image.shape == (512, 512, 3)
+    assert mask.shape == (512, 512)
+    assert image.min() >= 0 and image.max() <= 255
+    # zero is not included unless we're in incremental learning
+    assert mask.min() >= 0 and mask.max() <= 15
+
+
+def test_dataset_isaid_transform(isaid_path: Path):
+    transforms = alb.Compose(
+        [alb.Normalize(mean=(0.485, 0.456, 0.406, 0.485), std=(0.229, 0.224, 0.225, 0.229)),
+         ToTensorV2()])
+    dataset = PotsdamDataset(isaid_path, subset="train", transform=transforms)
+    assert len(dataset.categories()) == 16
+    assert dataset.has_background()
+    for image, mask in tqdm(dataset):
+        assert image.shape == (3, 512, 512)
+        assert mask.shape == (512, 512)
+        assert image.min() >= -100 and image.max() <= +100
+        assert mask.min() >= 0 and mask.max() <= 15
 
 
 def test_dataset_potsdam_icl_step0(potsdam_path: Path):

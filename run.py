@@ -4,8 +4,8 @@ import click
 from saticl import testing, training
 from saticl.cli import command
 from saticl.config import Configuration, SSLConfiguration, TestConfiguration
-from saticl.preproc import isprs
-from saticl.preproc.config import ISPRSPreprocConfig
+from saticl.preproc import isaid, isprs
+from saticl.preproc.config import ISAIDPreprocConfig, ISPRSPreprocConfig
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 INFO_FMT = "%(asctime)s - %(name)s  [%(levelname)s]: %(message)s"
@@ -27,6 +27,12 @@ def cli():
 def prepare_isprs(config: ISPRSPreprocConfig):
     init_logging(logging.INFO, INFO_FMT, DATE_FMT)
     isprs.main(config)
+
+
+@command(config=ISAIDPreprocConfig)
+def prepare_isaid(config: ISAIDPreprocConfig):
+    init_logging(logging.INFO, INFO_FMT, DATE_FMT)
+    isaid.main(config)
 
 
 @command(config=Configuration)
@@ -63,6 +69,7 @@ def test_ssl(config: TestConfiguration):
 
 if __name__ == "__main__":
     cli.add_command(prepare_isprs)
+    cli.add_command(prepare_isaid)
     cli.add_command(train)
     cli.add_command(test)
     cli.add_command(train_ssl)

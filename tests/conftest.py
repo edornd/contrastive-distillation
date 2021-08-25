@@ -19,5 +19,10 @@ def potsdam_path():
 
 
 @pytest.fixture(scope="session")
+def isaid_path():
+    return Path(get_env("DATA_ROOT_ISAID"))
+
+
+@pytest.fixture(scope="session")
 def potsdam_weights():
     return Path(get_env("WEIGHTS_PATH_POTSDAM"))

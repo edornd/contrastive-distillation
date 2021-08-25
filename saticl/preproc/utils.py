@@ -1,5 +1,5 @@
 import os
-from typing import Union
+from typing import Dict, Union
 
 import numpy as np
 
@@ -60,3 +60,20 @@ def tile_overlapped(image: np.ndarray,
             # assign tile to final tensor
             tiles[row, col] = image[x:x + tile_h, y:y + tile_w, :]
     return tiles
+
+
+def convert_mask(image: np.ndarray, lut: Dict[tuple, int]) -> np.ndarray:
+    """Converts a given RGB image containing labels in channels-last format (h, w, c)
+    into a greyscale mask where each index indicates a given class.
+
+    :param image: RGB input image with dimensions [height, width, channels]
+    :type image: np.ndarray
+    :param lut: look-up table containing the associations color -> index
+    :type lut: Dict[tuple, int]
+    :return: greyscale image with size [height, width] containing the mapped label indices
+    :rtype: np.ndarray
+    """
+    result = np.zeros(image.shape[:2])
+    for color, index in lut.items():
+        result[np.all(image == color, axis=-1)] = index
+    return result.astype(np.uint8)
