@@ -10,13 +10,14 @@ from ordered_set import OrderedSet
 from saticl.datasets.base import DatasetBase
 from saticl.logging.console import DistributedLogger
 from saticl.tasks.agrivision import ICL_AGRIVISION
+from saticl.tasks.isaid import ICL_ISAID
 from saticl.tasks.isprs import ICL_ISPRS
 from saticl.utils.common import prepare_folder
 from tqdm import tqdm
 
 LOG = DistributedLogger(logging.getLogger(__name__))
 
-AVAILABLE_TASKS = {"potsdam": ICL_ISPRS, "vaihingen": ICL_ISPRS, "agrivision": ICL_AGRIVISION}
+AVAILABLE_TASKS = {"potsdam": ICL_ISPRS, "vaihingen": ICL_ISPRS, "agrivision": ICL_AGRIVISION, "isaid": ICL_ISAID}
 
 
 def filter_with_overlap(image_labels: Iterable[int], new_labels: Iterable[int], *args, **kwargs) -> bool:
