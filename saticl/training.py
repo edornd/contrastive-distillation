@@ -94,7 +94,6 @@ def train(config: Configuration):
     train_mask, valid_mask = 0, 255
     train_set = ICLDataset(dataset=train_set, task=task, mask_value=train_mask, filter_mode=config.task.filter_mode)
     valid_set = ICLDataset(dataset=valid_set, task=task, mask_value=valid_mask, filter_mode=config.task.filter_mode)
-
     # construct data loaders
     train_loader = DataLoader(dataset=train_set,
                               batch_size=config.trainer.batch_size,

@@ -3,9 +3,15 @@ from typing import Callable
 
 from saticl.datasets.agrivision import AgriVisionDataset
 from saticl.datasets.base import DatasetBase
+from saticl.datasets.isaid import ISAIDDataset
 from saticl.datasets.isprs import PotsdamDataset, VaihingenDataset
 
-available_datasets = {"potsdam": PotsdamDataset, "vaihingen": VaihingenDataset, "agrivision": AgriVisionDataset}
+available_datasets = {
+    "potsdam": PotsdamDataset,
+    "vaihingen": VaihingenDataset,
+    "agrivision": AgriVisionDataset,
+    "isaid": ISAIDDataset
+}
 
 
 def create_dataset(name: str,

@@ -7,5 +7,5 @@
   "main_process_port": null,
   "main_training_function": "main",
   "num_machines": 1,
-  "num_processes": 2
+  "num_processes": 4
 }

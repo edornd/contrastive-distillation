@@ -276,9 +276,10 @@ class Trainer:
         y_pred = self.accelerator.gather(new_out)
         # store samples for visualization, if present. Requires a plot callback
         # better to unpack now, so that we don't have to deal with the batch size later
+        # also, we take just the first one, a lil bit hardcoded i know
         if self.sample_batches is not None and batch_index in self.sample_batches:
             images = self.accelerator.gather(x)
-            self._store_samples(images, y_pred, y_true)
+            self._store_samples(images[:1], y_pred[:1], y_true[:1])
         # update metrics and return losses
         self._update_metrics(y_true=y_true, y_pred=y_pred, stage=TrainerStage.val)
         return {"tot_loss": total, "seg_loss": seg_loss, "kdd_loss": kdd_loss}

@@ -26,6 +26,7 @@ class Datasets(StringEnum):
     potsdam = "potsdam"
     vaihingen = "vaihingen"
     agrivision = "agrivision"
+    isaid = "isaid"
 
 
 class ICLMethods(StringEnum):
@@ -145,7 +146,6 @@ class CEConfig(ObjectSettings):
     alpha: float = Field(0.6, description="Alpha param. for Tversky loss (0.5 for Dice)")
     beta: float = Field(0.4, description="Beta param. for Tversky loss (0.5 foor Dice)")
     gamma: float = Field(2.0, description="Gamma param. for focal loss (1.0 for standard CE)")
-    aug_factor: float = Field(0.0, description="Multiplier for the augmentation invariance regularization")
 
     def instantiate(self, *args, **kwargs) -> Any:
         assert "ignore_index" in kwargs, "Ignore index required"
@@ -198,6 +198,7 @@ class SSLModelConfig(ModelConfig):
 
 class AugInvarianceConfig(BaseSettings):
     factor: float = Field(0.0, description="Multiplier for the augmentation invariance regularization")
+    factor_icl: float = Field(0.0, description="Multiplier for the aug. invariance in the incremental step")
     flip: bool = Field(True, description="Whether to include random flipping as augmentation")
     fixed_angles: bool = Field(True, description="Whether to rotate of multiples of 90 or freely")
 

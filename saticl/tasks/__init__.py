@@ -80,6 +80,9 @@ def filter_with_split(dataset: DatasetBase, new_labels: set):
         available_labels = np.unique(mask)
         if dataset.has_background():
             available_labels = available_labels[available_labels != 0]
+        # it may happen when it only contains background
+        if len(available_labels) == 0:
+            continue
         # retrieve the currently less populated category (excluding background if present)
         # e.g. tile counts[ 34, 45, 12] -> index = 2
         # then use this index to retrieve the corresponding label

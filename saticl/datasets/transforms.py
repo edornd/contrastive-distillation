@@ -32,7 +32,8 @@ def train_transforms(image_size: int,
                      normalize: bool = True,
                      tensorize: bool = True,
                      compose: bool = True):
-    # alb.ChannelDropout(p=0.5, fill_value=0),
+    # Remove for actual training
+    # return alb.Compose([ToTensorV2()])
     min_crop = image_size // 2
     max_crop = image_size
     transforms = [
