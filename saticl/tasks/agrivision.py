@@ -1,0 +1,10 @@
+# 0: "background",
+# 1: "double_plant",
+# 2: "drydown",
+# 3: "endrow",
+# 4: "nutrient_deficiency",
+# 5: "planter_skip",
+# 6: "water",
+# 7: "waterway",
+# 8: "weed_cluster",
+ICL_AGRIVISION = {"offline": {0: [0, 1, 2, 3, 4, 5, 6, 7, 8]}, "6-2": {0: [0, 1, 2, 3, 4, 5, 8], 1: [6, 7]}}

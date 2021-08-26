@@ -9,62 +9,14 @@ import numpy as np
 from ordered_set import OrderedSet
 from saticl.datasets.base import DatasetBase
 from saticl.logging.console import DistributedLogger
+from saticl.tasks.agrivision import ICL_AGRIVISION
+from saticl.tasks.isprs import ICL_ISPRS
 from saticl.utils.common import prepare_folder
 from tqdm import tqdm
 
-
 LOG = DistributedLogger(logging.getLogger(__name__))
 
-ICL_ISPRS = {
-    # full segmentation, without incremental stuff
-    "offline": {
-        0: [0, 1, 2, 3, 4, 5]
-    },
-    # need to increment every index by 1 in the dataset, since the 'background' class does not really exist
-    # the 0 class is surface, which could be used as background, but here doesn't make sense
-    "222a": {
-        0: [0, 2],    # surface (0), low vegetation (2)
-        1: [1, 3],    # building (1), high vegetation(3)
-        2: [4, 5]    # car (4), clutter (5)
-    },
-    "321": {
-        0: [1, 3, 5],    # building(1), high veg. (3), clutter (5)
-        1: [0, 2],       # surface (0), low veg. (2)
-        2: [4]           # car (4)
-    },
-    "6s": {
-        0: [1],
-        1: [3],
-        2: [0],
-        3: [2],
-        4: [4],
-        5: [5]
-    }
-}
-# 0: "background",
-# 1: "double_plant",
-# 2: "drydown",
-# 3: "endrow",
-# 4: "nutrient_deficiency",
-# 5: "planter_skip",
-# 6: "water",
-# 7: "waterway",
-# 8: "weed_cluster",
-ICL_AGRIVISION = {
-    "offline": {
-        0: [0, 1, 2, 3, 4, 5, 6, 7, 8]
-    },
-    "6-2": {
-        0: [0, 1, 2, 3, 4, 5, 8],
-        1: [6, 7]
-    }
-}
-
-available_tasks = {
-    "potsdam": ICL_ISPRS,
-    "vaihingen": ICL_ISPRS,
-    "agrivision": ICL_AGRIVISION
-}
+AVAILABLE_TASKS = {"potsdam": ICL_ISPRS, "vaihingen": ICL_ISPRS, "agrivision": ICL_AGRIVISION}
 
 
 def filter_with_overlap(image_labels: Iterable[int], new_labels: Iterable[int], *args, **kwargs) -> bool:
@@ -100,6 +52,49 @@ def filter_without_overlap(image_labels: Iterable[int], new_labels: Iterable[int
     return contains_new_labels and no_future_labels
 
 
+def filter_with_split(dataset: DatasetBase, new_labels: set):
+    """Subdivides the given dataset into equal partitions, one per category (excluding background, if present).
+    If the dataset has N classes, this function divides into N splits, where each split i contributes with only
+    the label i.
+
+    Args:
+        dataset (DatasetBase): dataset to be filtered
+        new_labels (set): set of labels for current step
+
+    Returns:
+        List[bool]: list of values to be kept for the current step
+    """
+    # count samples and classes, we do not care about background for splits
+    num_samples = len(dataset)
+    shift = int(dataset.has_background())
+    num_classes = len(dataset.categories()) - shift
+    # create a dict of <index label: list of tiles> and a supporting count array
+    label2tile = defaultdict(list)
+    shuffled = random.sample(list(range(num_samples)), k=num_samples)
+    tile_counts = np.zeros(num_classes)
+
+    for i in tqdm(shuffled):
+        _, mask = dataset[i]
+        # extract unique labels, remove background if it's included
+        available_labels = np.unique(mask)
+        if dataset.has_background():
+            available_labels = available_labels[available_labels != 0]
+        # retrieve the currently less populated category (excluding background if present)
+        # e.g. tile counts[ 34, 45, 12] -> index = 2
+        # then use this index to retrieve the corresponding label
+        # last, store the tile for that label and increment the count
+        index = np.argmin(tile_counts[available_labels - shift])
+        label = available_labels[index]
+        label2tile[label].append(i)
+        tile_counts[label - shift] += 1
+    # create a list of booleans, one per sample, true when included, false otherwise
+    filtered = [False] * num_samples
+    for label, tiles in label2tile.items():
+        for index in tiles:
+            filtered[index] = label in new_labels
+    return filtered
+
+
 class Task:
 
     def __init__(self,
@@ -114,8 +109,8 @@ class Task:
         # - the task name appears in the entries associated with the dataset
         # - the step exists in the given task
         assert data_folder.exists() and data_folder.is_dir(), f"Wrong path: {str(data_folder)}"
-        assert dataset in available_tasks, f"No tasks for dataset: {dataset}"
-        tasks = available_tasks.get(dataset, {})
+        assert dataset in AVAILABLE_TASKS, f"No tasks for dataset: {dataset}"
+        tasks = AVAILABLE_TASKS.get(dataset, {})
         assert name in tasks, f"Unknown task: {name}"
         task_dict = tasks[name]
         assert step in task_dict, f"Step {step} out of range for: {task_dict}"
@@ -214,23 +209,7 @@ class Task:
                     mask_indices = np.unique(mask)
                     filtered.append(filter_fn(mask_indices, self.new_labels, self.seen_labels))
             else:
-                num_samples = len(dataset)
-                label2tile = defaultdict(list)
-                shuffled = random.sample(list(range(num_samples)), k=num_samples)
-                tile_counts = np.zeros(len(dataset.categories()))
-
-                for i in tqdm(shuffled):
-                    _, mask = dataset[i]
-                    available_labels = np.unique(mask)
-                    index = np.argmin(tile_counts[available_labels])
-                    label = available_labels[index]
-                    label2tile[label].append(i)
-                    tile_counts[label] += 1
-
-                filtered = [False] * len(dataset)
-                for label, tiles in label2tile.items():
-                    for index in tiles:
-                        filtered[index] = label in self.new_labels
+                filtered = filter_with_split(dataset, new_labels=self.new_labels)
 
             # create a numpy array of indices, then store it to file
             filtered = np.array(filtered)
