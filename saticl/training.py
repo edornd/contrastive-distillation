@@ -139,8 +139,10 @@ def train(config: Configuration):
     if task.step > 0 and config.ce.unbiased:
         seg_loss_name = str(type(segment_loss))
         kdd_loss_name = str(type(distill_loss))
-        assert "Unbiased" in seg_loss_name, f"Wrong loss '{seg_loss_name}' for step {task.step}"
-        assert "Unbiased" in kdd_loss_name, f"Wrong loss '{kdd_loss_name}' for step {task.step}"
+        if "Unbiased" not in seg_loss_name:
+            LOG.warn(f"Non-ubiased segmentation loss '{seg_loss_name}' for step {task.step}!")
+        if "Unbiased" not in kdd_loss_name:
+            LOG.warn(f"Non-unbiased KD loss '{kdd_loss_name}' for step {task.step}")
     # prepare metrics and logger
     monitored = config.trainer.monitor.name
     train_metrics, valid_metrics = prepare_metrics(task=task, device=accelerator.device)
@@ -158,9 +160,13 @@ def train(config: Configuration):
     # choose trainer class depending on task or regularization
     trainer_class = Trainer
     kwargs = dict()
-    if config.aug.factor > 0:
-        kwargs.update(aug_criterion=AugmentationInvariance(transform=invariance_transforms(config.aug)),
+    if config.aug.apply:
+        inv_transforms = invariance_transforms(config.aug)
+        LOG.info("Invariance transforms: ")
+        LOG.info(str(inv_transforms))
+        kwargs.update(aug_criterion=AugmentationInvariance(transform=inv_transforms),
                       aug_lambda=config.aug.factor,
+                      aug_lambda_icl=config.aug.factor_icl,
                       temperature=config.trainer.temperature,
                       temp_epochs=config.trainer.temp_epochs)
         trainer_class = AugInvarianceTrainer

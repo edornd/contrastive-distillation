@@ -4,6 +4,7 @@ import albumentations as alb
 from albumentations.pytorch import ToTensorV2
 from saticl.config import AugInvarianceConfig
 from saticl.transforms import (
+    ColorJitter,
     Compose,
     Denormalize,
     FixedRotation,
@@ -75,6 +76,8 @@ def invariance_transforms(config: AugInvarianceConfig):
         transforms.append(FixedRotation(p=1.0))
     else:
         transforms.append(RandomRotation(p=1.0, angles=360))
+    if config.color:
+        transforms.append(ColorJitter(p=1.0, brightness=0.1, contrast=0.1, saturation=0.1, hue=0.0))
     return Compose(transforms)
 
 

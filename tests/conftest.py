@@ -26,3 +26,8 @@ def isaid_path():
 @pytest.fixture(scope="session")
 def potsdam_weights():
     return Path(get_env("WEIGHTS_PATH_POTSDAM"))
+
+
+@pytest.fixture(scope="session")
+def checkpoint_path():
+    return Path(get_env("ICL_MODEL_WEIGHTS"))

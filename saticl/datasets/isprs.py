@@ -132,11 +132,11 @@ class ISPRSDataset(DatasetBase):
 
 class PotsdamDataset(ISPRSDataset):
 
-    def __init__(self, path: Path, subset: str, transform: Callable = None, channels: int = 3) -> None:
+    def __init__(self, path: Path, subset: str, transform: Callable = None, channels: int = 3, **kwargs) -> None:
         super().__init__(path, city="potsdam", subset=subset, postfix="rgbir", channels=channels, transform=transform)
 
 
 class VaihingenDataset(ISPRSDataset):
 
-    def __init__(self, path: Path, subset: str, transform: Callable = None, channels: int = 3) -> None:
+    def __init__(self, path: Path, subset: str, transform: Callable = None, channels: int = 3, **kwargs) -> None:
         super().__init__(path, city="vaihingen", subset=subset, postfix="rgb", channels=channels, transform=transform)

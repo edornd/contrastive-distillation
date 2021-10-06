@@ -1,4 +1,5 @@
 import logging
+import numbers
 import random
 from abc import abstractmethod
 from typing import Any, Dict, Optional, Sequence, Tuple, Union
@@ -88,7 +89,6 @@ class RandomRotation(Transform):
                  p: float = 0.5,
                  angles: Union[int, tuple] = 360,
                  interpolation: InterpolationMode = InterpolationMode.BILINEAR):
-        # always applied,
         super().__init__(p)
         if isinstance(angles, int):
             angles = (-angles, angles)
@@ -100,13 +100,100 @@ class RandomRotation(Transform):
             angle = random.randint(self.min, self.max)
             images = [func.rotate(img, angle, interpolation=self.interp, fill=0) for img in images]
             if label is not None:
-                label = func.rotate(label, angle, interpolation=InterpolationMode.NEAREST, fill=0)
+                label = func.rotate(label, angle, interpolation=InterpolationMode.NEAREST, fill=255)
                 return images, label
             return images
         else:
             if label is not None:
                 return images, label
             return images
+
+
+class ColorJitter(Transform):
+    """Randomly change the brightness, contrast and saturation of an image.
+    """
+    def __init__(self,
+                 p: float = 0.5,
+                 brightness: Union[float, tuple] = 0,
+                 contrast: Union[float, tuple] = 0,
+                 saturation: Union[float, tuple] = 0,
+                 hue: Union[float, tuple] = 0):
+        super().__init__(p)
+        self.brightness = self._check_input(brightness, 'brightness')
+        self.contrast = self._check_input(contrast, 'contrast')
+        self.saturation = self._check_input(saturation, 'saturation')
+        self.hue = self._check_input(hue, 'hue', center=0, bound=(-0.5, 0.5),
+                                     clip_first_on_zero=False)
+
+    def _check_input(self,
+                     value: Any,
+                     name: str,
+                     center: float = 1,
+                     bound: tuple = (0, float('inf')),
+                     clip_first_on_zero: bool = True):
+        if isinstance(value, numbers.Number):
+            if value < 0:
+                raise ValueError("If {} is a single number, it must be non negative.".format(name))
+            value = [center - value, center + value]
+            if clip_first_on_zero:
+                value[0] = max(value[0], 0)
+        elif isinstance(value, (tuple, list)) and len(value) == 2:
+            if not bound[0] <= value[0] <= value[1] <= bound[1]:
+                raise ValueError("{} values should be between {}".format(name, bound))
+        else:
+            raise TypeError("{} should be a single number or a list/tuple with lenght 2.".format(name))
+        # if value is 0 or (1., 1.) for brightness/contrast/saturation
+        # or (0., 0.) for hue, do nothing
+        if value[0] == value[1] == center:
+            value = None
+        return value
+
+    def get_params(self):
+        """Get a randomized transform to be applied on image.
+        Arguments are the same as of __init__.
+        Returns:
+            Transform which randomly adjusts brightness, contrast and
+            saturation in a random order.
+        """
+        transforms = []
+
+        if self.brightness is not None:
+            brightness_factor = random.uniform(self.brightness[0], self.brightness[1])
+            transforms.append(lambda img: func.adjust_brightness(img, brightness_factor))
+
+        if self.contrast is not None:
+            contrast_factor = random.uniform(self.contrast[0], self.contrast[1])
+            transforms.append(lambda img: func.adjust_contrast(img, contrast_factor))
+
+        if self.saturation is not None:
+            saturation_factor = random.uniform(self.saturation[0], self.saturation[1])
+            transforms.append(lambda img: func.adjust_saturation(img, saturation_factor))
+
+        if self.hue is not None:
+            hue_factor = random.uniform(self.hue[0], self.hue[1])
+            transforms.append(lambda img: func.adjust_hue(img, hue_factor))
+
+        random.shuffle(transforms)
+        return transforms
+
+    def __call__(self, *images: torch.Tensor, label: torch.Tensor = None):
+        if random.random() < self.p:
+            transforms = self.get_params()
+            transformed = []
+            for image in images:
+                # only applies to RGB images, the rest leave it as it is
+                if image.shape[1] != 3:
+                    transformed.append(image)
+                    continue
+                # apply list of color transformations to RGB
+                for transform in transforms:
+                    image = transform(image)
+                transformed.append(image)
+        else:
+            transformed = images
+        if label is not None:
+            return transformed, label
+        return transformed
 
 
 class Compose(Transform):
@@ -125,6 +212,9 @@ class Compose(Transform):
             for t in self.transforms:
                 images = t(*images)
             return images
+
+    def __repr__(self):
+        return "Compose[" + ",".join([str(t) for t in self.transforms]) + "]"
 
 
 class Denormalize:
@@ -147,7 +237,7 @@ class Denormalize:
         means = self.mean[:channels]
         stds = self.std[:channels]
         for t, mean, std in zip(tensor, means, stds):
-            t[:3].mul_(std).add_(mean)
+            t[:3].mul_(std - 1e-6).add_(mean)
         # swap from [B, C, H, W] to [B, H, W, C]
         tensor = tensor.permute(0, 2, 3, 1)
         tensor = tensor[0] if single_image else tensor

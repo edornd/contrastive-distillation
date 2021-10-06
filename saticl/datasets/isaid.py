@@ -55,12 +55,14 @@ class ISAIDDataset(DatasetBase):
                  subset: str = "train",
                  transform: Callable = None,
                  channels: int = 3,
-                 ignore_index: int = 255) -> None:
+                 ignore_index: int = 255,
+                 **kwargs: dict) -> None:
         super().__init__()
         assert channels == 3, "iSAID only supports RGB"
         self._channels = channels
         self._ignore_index = ignore_index
-        self._subset = subset
+        test_on_val = kwargs.get("test", False)
+        self._subset = subset if not test_on_val else "test"
         self.transform = transform
         # gather files to build the list of available pairs
         path = path / subset

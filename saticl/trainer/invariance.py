@@ -34,6 +34,7 @@ class AugInvarianceTrainer(Trainer):
                  kdd_lambda: float = 0.0,
                  kde_lambda: float = 0.0,
                  aug_lambda: float = 0.0,
+                 aug_lambda_icl: float = 0.0,
                  temperature: float = 4.0,
                  temp_epochs: int = 20,
                  train_metrics: Dict[str, Metric] = None,
@@ -62,7 +63,9 @@ class AugInvarianceTrainer(Trainer):
                          stage=stage,
                          debug=debug)
         self.regularizer = aug_criterion
+        self.aug_apply = aug_lambda > 0 or aug_lambda_icl > 0
         self.aug_lambda = aug_lambda
+        self.aug_lambda_icl = aug_lambda_icl
         self.temperature = temperature
         self.temp_epochs = temp_epochs
 
@@ -89,9 +92,6 @@ class AugInvarianceTrainer(Trainer):
             kdd_loss = torch.tensor(0.0, device=self.accelerator.device)
             logits, features = self.model(x)
             tensors = [x, features]
-            # handle multimodal output, if any
-            if self.multimodal:
-                raise NotImplementedError("Not working on it")
             # knowledge distillation from the old model
             # this only has effect from step 1 onwards
             if self.task.step > 0:
@@ -103,7 +103,7 @@ class AugInvarianceTrainer(Trainer):
             # z1 = f1(rot(x))
             # z2 = rot(f2(x))
             # f1 = new model, f2 = new model for step 0, old model in incremental setups
-            if self.aug_lambda > 0:
+            if self.aug_apply:
                 tensors_rot, y_rot = self.regularizer.apply_transform(*tensors, label=y)
                 rot_x, rot_f = tensors_rot[0], tensors_rot[1]
                 # compute forward on rotated image, merge rotated and non-rotated for segmentation
@@ -115,7 +115,7 @@ class AugInvarianceTrainer(Trainer):
                 rot_loss = self.aug_lambda * torch.nan_to_num(self.regularizer(rot_f, f_rot), nan=0.0)
                 if len(tensors_rot) > 2:
                     old_rot_loss = torch.nan_to_num(self.regularizer(f_rot, tensors_rot[-1]), nan=0.0)
-                    rot_loss = self.aug_lambda * 0.5 * old_rot_loss
+                    rot_loss += self.aug_lambda_icl * old_rot_loss
             # sum up losses
             seg_loss = self.criterion(logits, y)
             total = seg_loss + kdd_loss + rot_loss

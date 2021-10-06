@@ -31,6 +31,7 @@ class Datasets(StringEnum):
 
 class ICLMethods(StringEnum):
     FT = "FT"
+    UFT = "UFT"
     LWF = "LwF"
     LWFMC = "LwF-MC"
     ILT = "ILT"
@@ -54,7 +55,7 @@ class Optimizers(CallableEnum):
 
 class Schedulers(CallableEnum):
     plateau = Initializer(ReduceLROnPlateau)
-    exp = Initializer(ExponentialLR, gamma=0.95)
+    exp = Initializer(ExponentialLR, gamma=0.96)
     cosine = Initializer(CosineAnnealingLR, T_max=10)
 
 
@@ -100,7 +101,7 @@ class TrainerConfig(BaseSettings):
     cpu: bool = Field(False, description="Whether to use CPU or not")
     amp: bool = Field(True, description="Whether to use mixed precision (native)")
     batch_size: int = Field(8, description="Batch size for training")
-    num_workers: int = Field(8, description="Number of workers per dataloader")
+    num_workers: int = Field(4, description="Number of workers per dataloader")
     max_epochs: int = Field(100, description="How many epochs")
     monitor: Metrics = Field(Metrics.f1, description="Metric to be monitored")
     patience: int = Field(25, description="Amount of epochs without improvement in the monitored metric")
@@ -201,6 +202,14 @@ class AugInvarianceConfig(BaseSettings):
     factor_icl: float = Field(0.0, description="Multiplier for the aug. invariance in the incremental step")
     flip: bool = Field(True, description="Whether to include random flipping as augmentation")
     fixed_angles: bool = Field(True, description="Whether to rotate of multiples of 90 or freely")
+    color: bool = Field(False, description="Whether to apply color jitter as well (only for RGB/3chs)")
+    apply: bool = Field(False, description="Whether to apply invariance or not, overridden by factors > 0")
+
+    @validator("apply")
+    def post_load(cls, v, values, **kwargs):
+        if values["factor"] > 0 or values["factor_icl"] > 0:
+            return True
+        return v
 
 
 class Configuration(BaseSettings):
@@ -243,6 +252,15 @@ class Configuration(BaseSettings):
             values["kd"].unbiased = True
             values["kd"].decoder_factor = 10
             values["model"].init_balanced = True
+        elif v == ICLMethods.FT:
+            values["ce"].unbiased = False
+            values["kd"].unbiased = False
+            values["kd"].decoder_factor = 0
+            values["model"].init_balanced = False
+        elif v == ICLMethods.UFT:
+            values["ce"].unbiased = True
+            values["kd"].unbiased = False
+            values["kd"].decoder_factor = 0
         else:
             raise NotImplementedError(f"Method '{v}' not yet implemented")
         return v
@@ -256,5 +274,6 @@ class SSLConfiguration(Configuration):
 class TestConfiguration(Configuration):
     data_root: str = Field(None, description="Path to the dataset")
     store_predictions: bool = Field(False, description="Whether to store predicted images or not")
+    pred_count: int = Field(100, description="How many predictions to store (chosen randomly)")
     test_on_val: bool = Field(False, description="""Sometimes datasets do not share the GT for the test set:
                                                  if you want to run a test against the validation set, set this to true""")

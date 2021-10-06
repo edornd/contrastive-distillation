@@ -15,6 +15,7 @@ from saticl.tasks.isprs import ICL_ISPRS
 from saticl.utils.common import prepare_folder
 from tqdm import tqdm
 
+
 LOG = DistributedLogger(logging.getLogger(__name__))
 
 AVAILABLE_TASKS = {"potsdam": ICL_ISPRS, "vaihingen": ICL_ISPRS, "agrivision": ICL_AGRIVISION, "isaid": ICL_ISAID}
@@ -204,6 +205,9 @@ class Task:
         if cached_path.exists() and cached_path.is_file():
             filtered = np.load(cached_path)
         else:
+            # quick hack just to avoid losing time transforming, we don't need it
+            transform = dataset.transform
+            dataset.transform = None
             filtered = list()
             if mode != "split":
                 # first select the right function for the filtering
@@ -214,7 +218,8 @@ class Task:
                     filtered.append(filter_fn(mask_indices, self.new_labels, self.seen_labels))
             else:
                 filtered = filter_with_split(dataset, new_labels=self.new_labels)
-
+            # restore dataset transforms before it's too late
+            dataset.transform = transform
             # create a numpy array of indices, then store it to file
             filtered = np.array(filtered)
             cached_path = prepare_folder(cached_path.parent)
