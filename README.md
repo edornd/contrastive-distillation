@@ -1,3 +1,4 @@
-# Incremental Class Learning with Multimodal datasets
+# A Contrastive Distillation Approach for Incremental Semantic Segmentation in Aerial Images
 
-Documentation is not ready, please bear with me.
+Publication accepted at ICIAP 2021.
+Documentation is not ready yet.
