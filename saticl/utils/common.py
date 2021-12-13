@@ -1,6 +1,7 @@
 import collections
 import logging
 import os
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,10 @@ from tqdm import tqdm
 
 def current_timestamp() -> str:
     return datetime.strftime(datetime.now(), "%Y-%m-%d-%H-%M")
+
+
+def git_revision_hash():
+    return subprocess.check_output(['git', 'rev-parse', 'HEAD'])
 
 
 def generate_id() -> str:

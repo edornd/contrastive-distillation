@@ -88,7 +88,7 @@ class AgriVisionDataset(DatasetBase):
         if self.transform is not None:
             pair = self.transform(image=image, mask=label)
             image = pair.get("image")
-            label = pair.get("mask")
+            label = pair.get("mask").astype(np.uint64)
         return image, label
 
     def add_mask(self, mask: List[bool], stage: str = None) -> None:

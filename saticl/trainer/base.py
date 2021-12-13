@@ -10,13 +10,14 @@ import numpy as np
 import torch
 from accelerate import Accelerator
 from torch import nn
-from torch.cuda.amp import GradScaler
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
 from saticl.logging import BaseLogger
 from saticl.logging.empty import EmptyLogger
+from saticl.losses.regularization import MultiModalScaling
 from saticl.metrics import Metric
+from saticl.models.encoders import MultiEncoder
 from saticl.tasks import Task
 from saticl.utils.common import get_logger, progressbar
 from saticl.utils.decorators import get_rank
@@ -66,8 +67,9 @@ class Trainer:
         self.criterion_kde = kde_criterion
         self.kdd_lambda = kdd_lambda
         self.kde_lambda = kde_lambda
+        self.multimodal = isinstance(new_model.encoder, MultiEncoder)
+        self.criterion_mmd = MultiModalScaling()
         # optimizer, scheduler and logger, scaler for AMP
-        self.scaler = GradScaler()
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.logger = logger or EmptyLogger()
@@ -192,16 +194,17 @@ class Trainer:
         x, y = batch
         # forward and loss on segmentation task
         with self.accelerator.autocast():
-            new_out, new_features = self.model(x)
+            new_out, _ = self.model(x)
             seg_loss = self.criterion(new_out, y)
-            # forward and loss on knowledge distillation task
+            # this only has effect from step 1 onwards
             kdd_loss = torch.tensor(0, device=seg_loss.device, dtype=seg_loss.dtype)
             if self.task.step > 0:
-                old_out, old_features = self.old_model(x)
+                old_out, _ = self.old_model(x)
                 kdd_loss = self.criterion_kdd(new_out, old_out)
             # sum up losses
             total = seg_loss + self.kdd_lambda * kdd_loss
         # gather and update metrics
+        # we group only the 'standard' images, not the rotated ones
         y_true = self.accelerator.gather(y)
         y_pred = self.accelerator.gather(new_out)
         self._update_metrics(y_true=y_true, y_pred=y_pred, stage=TrainerStage.train)
@@ -227,7 +230,6 @@ class Trainer:
             # backward pass
             self.accelerator.backward(loss)
             self.optimizer.step()
-            self.scheduler.step()
             # measure elapsed time
             elapsed = (time.time() - start)
             # store training info
@@ -274,9 +276,10 @@ class Trainer:
         y_pred = self.accelerator.gather(new_out)
         # store samples for visualization, if present. Requires a plot callback
         # better to unpack now, so that we don't have to deal with the batch size later
+        # also, we take just the first one, a lil bit hardcoded i know
         if self.sample_batches is not None and batch_index in self.sample_batches:
             images = self.accelerator.gather(x)
-            self._store_samples(images, y_pred, y_true)
+            self._store_samples(images[:1], y_pred[:1], y_true[:1])
         # update metrics and return losses
         self._update_metrics(y_true=y_true, y_pred=y_pred, stage=TrainerStage.val)
         return {"tot_loss": total, "seg_loss": seg_loss, "kdd_loss": kdd_loss}
@@ -324,6 +327,8 @@ class Trainer:
             try:
                 self.train_epoch_start()
                 t_losses, t_times = self.train_epoch(epoch=self.current_epoch, train_dataloader=train_dataloader)
+                # not the best place to call it, but it's best to call it every epoch instead of iteration
+                self.scheduler.step()
                 self.train_epoch_end(t_losses, t_times)
 
                 if val_dataloader is not None:

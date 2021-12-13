@@ -32,7 +32,8 @@ class UNet(Decoder):
                  act_layer: Type[nn.Module],
                  norm_layer: Type[nn.Module],
                  bilinear: bool = True,
-                 num_classes: int = None):
+                 num_classes: int = None,
+                 drop_channels: bool = False):
         super().__init__()
         # invert sequences to decode
         channels = feature_channels[::-1]
@@ -51,7 +52,10 @@ class UNet(Decoder):
                                 scale_factor=scaling_factors[i],
                                 bilinear=bilinear))
         self.out_channels = channels[-1]
-        self.out = UNetHead(in_channels=self.out_channels, num_classes=num_classes, scale_factor=scaling_factors[-1])
+        self.out = UNetHead(in_channels=self.out_channels,
+                            num_classes=num_classes,
+                            scale_factor=scaling_factors[-1],
+                            drop_channels=drop_channels)
 
     @classmethod
     def required_indices(cls, encoder: str) -> List[int]:

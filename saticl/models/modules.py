@@ -170,9 +170,15 @@ class UNetDecodeBlock(nn.Module):
 
 class UNetHead(nn.Module):
 
-    def __init__(self, in_channels: int, num_classes: int, scale_factor: int = 2, dropout_prob: float = 0.5):
+    def __init__(self,
+                 in_channels: int,
+                 num_classes: int,
+                 scale_factor: int = 2,
+                 dropout_prob: float = 0.5,
+                 drop_channels: bool = False):
         super().__init__()
-        self.dropout = nn.Dropout(p=dropout_prob)
+        drop_class = nn.Dropout2d if drop_channels else nn.Dropout
+        self.dropout = drop_class(p=dropout_prob, inplace=True)
         self.upsample = nn.Upsample(scale_factor=scale_factor, mode="bilinear", align_corners=True)
         self.out = nn.Conv2d(in_channels, num_classes, kernel_size=1) if num_classes else nn.Identity()
 
@@ -199,7 +205,7 @@ class SSMA(nn.Module):
         self.bottleneck = nn.Sequential(nn.Conv2d(total_chs, bottleneck_chs, kernel_size=3, padding=1, bias=False),
                                         norm_layer(bottleneck_chs), act_layer(),
                                         nn.Conv2d(bottleneck_chs, total_chs, kernel_size=3, padding=1, bias=False),
-                                        norm_layer(total_chs), act_layer())
+                                        norm_layer(total_chs), nn.Sigmoid())
         # the output is given by the RGB network, which is supposed to be bigger
         # also, this allows for easier integration with decoders
         self.out_bn = norm_layer(total_chs)
@@ -208,7 +214,8 @@ class SSMA(nn.Module):
     def forward(self, rgb: torch.Tensor, ir: torch.Tensor) -> torch.Tensor:
         x1 = torch.cat((rgb, ir), dim=1)
         x = self.bottleneck(x1)
-        x = self.out_bn(x1 + x)
+        recalibrated = x1 * x
+        x = self.out_bn(recalibrated)
         return self.out_conv(x)
 
 

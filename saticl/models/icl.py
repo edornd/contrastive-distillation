@@ -4,6 +4,7 @@ import torch
 from torch import nn
 
 from saticl.models.base import Decoder, Encoder, Head
+from saticl.models.encoders import MultiEncoder
 
 
 class ClassifierHead(nn.Module):
@@ -53,12 +54,14 @@ class ICLSegmenter(nn.Module):
         self.classes = classes
         self.classes_total = sum(classes)
         self.return_features = return_features
+        self.multimodal = isinstance(encoder, MultiEncoder)
 
     def forward_features(self, inputs: Tuple[torch.Tensor, ...]) -> Tuple[torch.Tensor, ...]:
         encoder_out = self.encoder(inputs)
-        decoder_out = self.decoder(encoder_out)
+        decoder_in = encoder_out["out"] if self.multimodal else encoder_out
+        decoder_out = self.decoder(decoder_in)
         head_out = torch.cat([head(decoder_out) for head in self.classifiers], dim=1)
-        return head_out, (encoder_out, decoder_out)
+        return head_out, decoder_out
 
     def forward(self, inputs: Tuple[torch.Tensor, ...]) -> Tuple[torch.Tensor, ...]:
         out, features = self.forward_features(inputs)

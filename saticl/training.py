@@ -8,16 +8,18 @@ from torch.utils.data import DataLoader
 
 from saticl.config import Configuration, SSLConfiguration
 from saticl.datasets.icl import ICLDataset
-from saticl.datasets.ssl import SSLDataset
-from saticl.datasets.transforms import inverse_transform, ssl_transforms
+from saticl.datasets.transforms import invariance_transforms, inverse_transform, ssl_transforms
+from saticl.datasets.wrappers import SSLDataset
 from saticl.logging.tensorboard import TensorBoardLogger
+from saticl.losses.regularization import AugmentationInvariance
 from saticl.models.icl import ICLSegmenter
 from saticl.prepare import prepare_dataset, prepare_metrics, prepare_metrics_ssl, prepare_model, prepare_model_ssl
 from saticl.tasks import Task
 from saticl.trainer.base import Trainer
 from saticl.trainer.callbacks import Checkpoint, DisplaySamples, EarlyStopping, EarlyStoppingCriterion
+from saticl.trainer.invariance import AugInvarianceTrainer
 from saticl.trainer.ssl import SSLStage, SSLTrainer
-from saticl.utils.common import flatten_config, get_logger, store_config
+from saticl.utils.common import flatten_config, get_logger, git_revision_hash, store_config
 from saticl.utils.ml import checkpoint_path, init_experiment, seed_everything, seed_worker
 
 
@@ -69,7 +71,6 @@ def train(config: Configuration):
     log_name = f"output-{config.task.step}.log"
     exp_id, out_folder, model_folder, logs_folder = init_experiment(config=config, log_name=log_name)
     config_path = out_folder / f"segmenter-config-s{config.task.step}.yaml"
-    store_config(config, path=config_path)
     LOG.info("Run started")
     LOG.info("Experiment ID: %s", exp_id)
     LOG.info("Output folder: %s", out_folder)
@@ -82,7 +83,7 @@ def train(config: Configuration):
     seed_everything(config.seed)
     # prepare datasets
     LOG.info("Loading datasets...")
-    train_set, valid_set = prepare_dataset(config=config)
+    train_set, valid_set = prepare_dataset(config=config, partial_transforms=False)
     LOG.info("Full sets - train set: %d samples, validation set: %d samples", len(train_set), len(valid_set))
 
     add_background = not train_set.has_background()
@@ -91,8 +92,9 @@ def train(config: Configuration):
                 step=config.task.step,
                 add_background=add_background)
     train_mask, valid_mask = 0, 255
-    train_set = ICLDataset(dataset=train_set, task=task, mask_value=train_mask, overlap=config.task.overlap)
-    valid_set = ICLDataset(dataset=valid_set, task=task, mask_value=valid_mask, overlap=config.task.overlap)
+    train_set = ICLDataset(dataset=train_set, task=task, mask_value=train_mask, filter_mode=config.task.filter_mode)
+    valid_set = ICLDataset(dataset=valid_set, task=task, mask_value=valid_mask, filter_mode=config.task.filter_mode)
+    # construct data loaders
     train_loader = DataLoader(dataset=train_set,
                               batch_size=config.trainer.batch_size,
                               shuffle=True,
@@ -137,8 +139,10 @@ def train(config: Configuration):
     if task.step > 0 and config.ce.unbiased:
         seg_loss_name = str(type(segment_loss))
         kdd_loss_name = str(type(distill_loss))
-        assert "Unbiased" in seg_loss_name, f"Wrong loss '{seg_loss_name}' for step {task.step}"
-        assert "Unbiased" in kdd_loss_name, f"Wrong loss '{kdd_loss_name}' for step {task.step}"
+        if "Unbiased" not in seg_loss_name:
+            LOG.warn(f"Non-ubiased segmentation loss '{seg_loss_name}' for step {task.step}!")
+        if "Unbiased" not in kdd_loss_name:
+            LOG.warn(f"Non-unbiased KD loss '{kdd_loss_name}' for step {task.step}")
     # prepare metrics and logger
     monitored = config.trainer.monitor.name
     train_metrics, valid_metrics = prepare_metrics(task=task, device=accelerator.device)
@@ -153,24 +157,38 @@ def train(config: Configuration):
     # prepare trainer
     LOG.info("Visualize: %s, num. batches for visualization: %s", str(config.visualize), str(config.num_samples))
     num_samples = int(config.visualize) * config.num_samples
-    trainer = Trainer(accelerator=accelerator,
-                      task=task,
-                      new_model=new_model,
-                      old_model=old_model,
-                      optimizer=optimizer,
-                      scheduler=scheduler,
-                      train_metrics=train_metrics,
-                      val_metrics=valid_metrics,
-                      old_classes=train_set.old_categories(),
-                      new_classes=train_set.new_categories(),
-                      seg_criterion=segment_loss,
-                      kdd_criterion=distill_loss,
-                      kde_criterion=None,
-                      kdd_lambda=config.kd.decoder_factor,
-                      kde_lambda=config.kd.encoder_factor,
-                      logger=logger,
-                      samples=num_samples,
-                      debug=config.debug)
+    # choose trainer class depending on task or regularization
+    trainer_class = Trainer
+    kwargs = dict()
+    if config.aug.apply:
+        inv_transforms = invariance_transforms(config.aug)
+        LOG.info("Invariance transforms: ")
+        LOG.info(str(inv_transforms))
+        kwargs.update(aug_criterion=AugmentationInvariance(transform=inv_transforms),
+                      aug_lambda=config.aug.factor,
+                      aug_lambda_icl=config.aug.factor_icl,
+                      temperature=config.trainer.temperature,
+                      temp_epochs=config.trainer.temp_epochs)
+        trainer_class = AugInvarianceTrainer
+    trainer = trainer_class(accelerator=accelerator,
+                            task=task,
+                            new_model=new_model,
+                            old_model=old_model,
+                            optimizer=optimizer,
+                            scheduler=scheduler,
+                            train_metrics=train_metrics,
+                            val_metrics=valid_metrics,
+                            old_classes=train_set.old_categories(),
+                            new_classes=train_set.new_categories(),
+                            seg_criterion=segment_loss,
+                            kdd_criterion=distill_loss,
+                            kde_criterion=None,
+                            kdd_lambda=config.kd.decoder_factor,
+                            kde_lambda=config.kd.encoder_factor,
+                            logger=logger,
+                            samples=num_samples,
+                            debug=config.debug,
+                            **kwargs)
     trainer.add_callback(EarlyStopping(call_every=1, metric=monitored,
                                        criterion=EarlyStoppingCriterion.maximum,
                                        patience=config.trainer.patience)) \
@@ -180,10 +198,13 @@ def train(config: Configuration):
                                     save_best=True)) \
            .add_callback(DisplaySamples(inverse_transform=inverse_transform(),
                                         color_palette=train_set.palette()))
+    # storing config and starting training
+    config.version = git_revision_hash()
+    store_config(config, path=config_path)
     trainer.fit(train_dataloader=train_loader, val_dataloader=valid_loader, max_epochs=config.trainer.max_epochs)
     LOG.info(f"Training completed at epoch {trainer.current_epoch:<2d} "
              f"(best {monitored}: {trainer.best_score:.4f})")
-    LOG.info("Experiment %s completed!", exp_id)
+    LOG.info("Experiment %s (step %d) completed!", exp_id, task.step)
 
 
 def train_ssl(config: SSLConfiguration):
@@ -221,7 +242,7 @@ def train_ssl(config: SSLConfiguration):
     # prepare datasets
     LOG.info("Loading datasets...")
     train_set, valid_set = prepare_dataset(config=config)
-    train_set = SSLDataset(train_set, ssl_transform=ssl_transforms())
+    train_set = SSLDataset(train_set, transform=ssl_transforms())
     LOG.info("Full sets - train set: %d samples, validation set: %d samples", len(train_set), len(valid_set))
 
     add_background = not train_set.has_background()
@@ -230,8 +251,8 @@ def train_ssl(config: SSLConfiguration):
                 step=config.task.step,
                 add_background=add_background)
     train_mask, valid_mask = 0, 255
-    train_set = ICLDataset(dataset=train_set, task=task, mask_value=train_mask, overlap=config.task.overlap)
-    valid_set = ICLDataset(dataset=valid_set, task=task, mask_value=valid_mask, overlap=config.task.overlap)
+    train_set = ICLDataset(dataset=train_set, task=task, mask_value=train_mask, filter_mode=config.task.filter_mode)
+    valid_set = ICLDataset(dataset=valid_set, task=task, mask_value=valid_mask, filter_mode=config.task.filter_mode)
     train_loader = DataLoader(dataset=train_set,
                               batch_size=config.trainer.batch_size,
                               shuffle=True,
@@ -324,4 +345,4 @@ def train_ssl(config: SSLConfiguration):
     trainer.fit(train_dataloader=train_loader, val_dataloader=valid_loader, max_epochs=config.trainer.max_epochs)
     LOG.info(f"Training completed at epoch {trainer.current_epoch:<2d} "
              f"(best {monitored}: {trainer.best_score:.4f})")
-    LOG.info("Experiment %s completed!", exp_id)
+    LOG.info("Experiment %s (step %d) completed!", exp_id, task.step)

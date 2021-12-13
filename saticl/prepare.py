@@ -7,7 +7,7 @@ from torch import nn
 
 from saticl.config import Configuration, Metrics, ModelConfig, SSLConfiguration
 from saticl.datasets import create_dataset
-from saticl.datasets.icl import ICLDataset
+from saticl.datasets.base import DatasetBase
 from saticl.datasets.transforms import test_transforms, train_transforms
 from saticl.metrics import F1Score, IoU, Metric, lenient_argmax
 from saticl.models import create_decoder, create_encoder
@@ -22,16 +22,27 @@ from saticl.utils.ml import mask_set
 LOG = get_logger(__name__)
 
 
-def prepare_dataset(config: Configuration) -> ICLDataset:
+def prepare_dataset(config: Configuration, partial_transforms: bool = True) -> Tuple[DatasetBase, DatasetBase]:
     # instantiate transforms for training and evaluation
+    # we keep them without norm and toTensor in case of contrastive regularization, so that we can transform later
+    # after the ICL filtering, using the ContrastiveDataset wrapper
     data_root = Path(config.data_root)
-    train_transform = train_transforms(image_size=config.image_size,
-                                       in_channels=config.in_channels,
-                                       channel_transforms=config.channel_drop,
-                                       modality_transforms=config.modality_drop)
+    if partial_transforms:
+        train_transform = train_transforms(image_size=config.image_size,
+                                           in_channels=config.in_channels,
+                                           channel_dropout=config.channel_drop,
+                                           modality_dropout=config.modality_drop,
+                                           normalize=False,
+                                           tensorize=False)
+    else:
+        train_transform = train_transforms(image_size=config.image_size,
+                                           in_channels=config.in_channels,
+                                           channel_dropout=config.channel_drop,
+                                           modality_dropout=config.modality_drop)
+    config.model.transforms = str(train_transform)
     eval_transform = test_transforms(in_channels=config.in_channels)
-    LOG.debug("Train transforms: %s", str(train_transform))
-    LOG.debug("Eval. transforms: %s", str(eval_transform))
+    LOG.info("Train transforms: %s", str(train_transform))
+    LOG.info("Eval. transforms: %s", str(eval_transform))
     # create the train dataset, then split or create the ad hoc validation set
     train_dataset = create_dataset(config.dataset,
                                    path=data_root,
@@ -43,7 +54,7 @@ def prepare_dataset(config: Configuration) -> ICLDataset:
         # In the first case (like this one), a portion of training is reserved for validation
         # In the second case, the validation becomes testing and the training is again split randomly
         train_mask, val_mask, _ = mask_set(len(train_dataset), val_size=config.val_size, test_size=0.0)
-        LOG.debug("Creating val. set from training, split: %d - %d", len(train_mask), len(val_mask))
+        LOG.debug("Creating val. set from training, split: %d - %d", sum(train_mask), sum(val_mask))
         val_dataset = create_dataset(config.dataset,
                                      path=data_root,
                                      subset="train",
@@ -61,7 +72,7 @@ def prepare_dataset(config: Configuration) -> ICLDataset:
     return train_dataset, val_dataset
 
 
-def create_multi_encoder(name_rgb: str, name_ir: str, config: ModelConfig) -> MultiEncoder:
+def create_multi_encoder(name_rgb: str, name_ir: str, config: ModelConfig, **kwargs: dict) -> MultiEncoder:
     encoder_a = create_encoder(name=name_rgb,
                                decoder=config.decoder,
                                pretrained=config.pretrained,
@@ -74,11 +85,12 @@ def create_multi_encoder(name_rgb: str, name_ir: str, config: ModelConfig) -> Mu
                                decoder=config.decoder,
                                pretrained=config.pretrained,
                                freeze=config.freeze,
-                               output_stride=config.output_stride,
+                               output_stride=None,   # somehow, with this we obtain the same reductions of TResNet
                                act_layer=config.act,
                                norm_layer=config.norm,
-                               channels=1)
-    return MultiEncoder(encoder_a, encoder_b, act_layer=config.act, norm_layer=config.norm)
+                               channels=1,
+                               auxiliary=name_rgb)
+    return MultiEncoder(encoder_a, encoder_b, act_layer=config.act, norm_layer=config.norm, **kwargs)
 
 
 def prepare_model(config: Configuration, task: Task) -> nn.Module:
@@ -97,17 +109,27 @@ def prepare_model(config: Configuration, task: Task) -> nn.Module:
                                  norm_layer=cfg.norm,
                                  channels=config.in_channels)
     elif len(enc_names) == 2:
-        encoder = create_multi_encoder(name_rgb=enc_names[0], name_ir=enc_names[1], config=cfg)
+        LOG.info("Creating a multimodal encoder (%s, %s)", enc_names[0], enc_names[1])
+        encoder = create_multi_encoder(name_rgb=enc_names[0],
+                                       name_ir=enc_names[1],
+                                       config=cfg,
+                                       return_features=False)
     else:
         NotImplementedError(f"The provided list of encoders is not supported: {cfg.encoder}")
     # create decoder: always uses the RGB encoder as reference
     # SSMA blocks in the multiencoder merge the features into a number of channels equal to RGB for each layer.
+    additional_args = dict()
+    if hasattr(config.model, "dropout2d"):
+        LOG.info("Adding 2D dropout to the decoder's head: %s", str(config.model.dropout2d))
+        additional_args.update(drop_channels=config.model.dropout2d)
     decoder = create_decoder(name=cfg.decoder,
                              feature_info=encoder.feature_info,
                              act_layer=cfg.act,
-                             norm_layer=cfg.norm)
+                             norm_layer=cfg.norm,
+                             **additional_args)
     # extract intermediate features when encoder KD is required
-    extract_features = config.kd.encoder_factor > 0
+    extract_features = config.kd.encoder_factor > 0 or config.aug.apply
+    LOG.info("Returning intermediate features: %s", str(extract_features))
     icl_model = ICLSegmenter(encoder, decoder, classes=task.num_classes_per_task(), return_features=extract_features)
     return icl_model
 

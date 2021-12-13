@@ -8,9 +8,12 @@ import albumentations as alb
 from albumentations.pytorch import ToTensorV2
 from saticl.datasets import create_dataset
 from saticl.datasets.icl import ICLDataset
+from saticl.datasets.isaid import ISAIDDataset
 from saticl.datasets.isprs import PotsdamDataset
-from saticl.datasets.transforms import test_transforms, train_transforms
+from saticl.datasets.transforms import geom_transforms, test_transforms, train_transforms
+from saticl.datasets.wrappers import ContrastiveDataset
 from saticl.tasks import Task
+from saticl.transforms import ContrastiveTransform
 from saticl.utils.ml import mask_set, seed_everything
 from tqdm import tqdm
 
@@ -52,6 +55,29 @@ def test_dataset_potsdam_ir_transform(potsdam_path: Path):
     assert mask.min() >= 0 and mask.max() <= 5
 
 
+def test_dataset_isaid(isaid_path: Path):
+    dataset = ISAIDDataset(isaid_path, subset="train", transform=None, channels=3)
+    assert len(dataset.categories()) == 16
+    image, mask = dataset.__getitem__(0)
+    assert image.shape == (512, 512, 3)
+    assert mask.shape == (512, 512)
+    assert image.min() >= 0 and image.max() <= 255
+    # zero is not included unless we're in incremental learning
+    assert mask.min() >= 0 and mask.max() <= 15
+
+
+def test_dataset_isaid_transform(isaid_path: Path):
+    transforms = alb.Compose([alb.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)), ToTensorV2()])
+    dataset = ISAIDDataset(isaid_path, subset="train", transform=transforms)
+    assert len(dataset.categories()) == 16
+    assert dataset.has_background()
+    for image, mask in tqdm(dataset):
+        assert image.shape == (3, 512, 512)
+        assert mask.shape == (512, 512)
+        assert image.min() >= -100 and image.max() <= +100
+        assert mask.min() >= 0 and mask.max() <= 15
+
+
 def test_dataset_potsdam_icl_step0(potsdam_path: Path):
     # instantiate transforms for training
     seed_everything(1337)
@@ -66,7 +92,7 @@ def test_dataset_potsdam_icl_step0(potsdam_path: Path):
     original_length = len(train_dataset)
 
     task = Task(dataset="potsdam", name="222a")
-    icl_set = ICLDataset(train_dataset, task, overlap=True)
+    icl_set = ICLDataset(train_dataset, task, filter_mode="overlap")
     # check it includes the previously missing background + handpicked check
     assert len(icl_set.categories()) == 7
     assert icl_set.categories()[1] == "impervious_surfaces"
@@ -102,7 +128,7 @@ def test_dataset_potsdam_icl_step1(potsdam_path: Path):
     original_length = len(train_dataset)
 
     task = Task(dataset="potsdam", name="222a", step=1, add_background=not train_dataset.has_background())
-    icl_set = ICLDataset(train_dataset, task, overlap=True)
+    icl_set = ICLDataset(train_dataset, task, filter_mode="overlap")
     # check it includes the previously missing background + handpicked check
     assert len(icl_set.categories()) == 7
     assert icl_set.categories()[1] == "impervious_surfaces"
@@ -138,7 +164,7 @@ def test_dataset_potsdam_icl_step2(potsdam_path: Path):
     original_length = len(train_dataset)
 
     task = Task(dataset="potsdam", name="222a", step=2)
-    icl_set = ICLDataset(train_dataset, task, overlap=True)
+    icl_set = ICLDataset(train_dataset, task, filter_mode="overlap")
     # check it includes the previously missing background + handpicked check
     assert len(icl_set.categories()) == 7
     assert icl_set.categories()[1] == "impervious_surfaces"
@@ -169,16 +195,16 @@ def test_dataset_potsdam_icl_step0_weights(potsdam_path: Path, potsdam_weights: 
     original_length = len(train_dataset)
 
     task = Task(dataset="potsdam", name="321", step=0)
-    icl_set = ICLDataset(train_dataset, task, overlap=True)
+    icl_set = ICLDataset(train_dataset, task, filter_mode="overlap")
     # check it includes the previously missing background + handpicked check
     assert len(icl_set.categories()) == 7
     assert icl_set.categories()[1] == "impervious_surfaces"
     assert len(icl_set) < original_length
     # load weights
-    weights = icl_set.load_class_weights(potsdam_weights)
+    weights = icl_set.load_class_weights(potsdam_weights, device=torch.device("cpu"))
     assert len(weights) == 4
     LOG.info("Weights: %s", weights)
-    LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, normalize=True))
+    LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, device=torch.device("cpu"), normalize=True))
 
 
 def test_dataset_potsdam_icl_step1_weights(potsdam_path: Path, potsdam_weights: Path):
@@ -190,16 +216,16 @@ def test_dataset_potsdam_icl_step1_weights(potsdam_path: Path, potsdam_weights: 
     original_length = len(train_dataset)
 
     task = Task(dataset="potsdam", name="321", step=1)
-    icl_set = ICLDataset(train_dataset, task, overlap=True)
+    icl_set = ICLDataset(train_dataset, task, filter_mode="overlap")
     # check it includes the previously missing background + handpicked check
     assert len(icl_set.categories()) == 7
     assert icl_set.categories()[1] == "impervious_surfaces"
     assert len(icl_set) < original_length
     # load weights
-    weights = icl_set.load_class_weights(potsdam_weights)
+    weights = icl_set.load_class_weights(potsdam_weights, device=torch.device("cpu"))
     assert len(weights) == 6
     LOG.info("Weights: %s", weights)
-    LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, normalize=True))
+    LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, device=torch.device("cpu"), normalize=True))
 
 
 def test_dataset_potsdam_icl_step2_weights(potsdam_path: Path, potsdam_weights: Path):
@@ -211,13 +237,39 @@ def test_dataset_potsdam_icl_step2_weights(potsdam_path: Path, potsdam_weights: 
     original_length = len(train_dataset)
 
     task = Task(dataset="potsdam", name="321", step=2)
-    icl_set = ICLDataset(train_dataset, task, overlap=True)
+    icl_set = ICLDataset(train_dataset, task, filter_mode="overlap")
     # check it includes the previously missing background + handpicked check
     assert len(icl_set.categories()) == 7
     assert icl_set.categories()[1] == "impervious_surfaces"
     assert len(icl_set) < original_length
     # load weights
-    weights = icl_set.load_class_weights(potsdam_weights)
+    weights = icl_set.load_class_weights(potsdam_weights, device=torch.device("cpu"))
     assert len(weights) == 7
     LOG.info("Weights: %s", weights)
-    LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, normalize=True))
+    LOG.info("Normalized: %s", icl_set.load_class_weights(potsdam_weights, device=torch.device("cpu"), normalize=True))
+
+
+def test_dataset_potsdam_augmentations(potsdam_path: Path):
+    # instantiate transforms for training
+    seed_everything(1337)
+    # create the train dataset, then split or create the ad hoc validation set
+    train_transform = train_transforms(image_size=512,
+                                       in_channels=4,
+                                       channel_dropout=0.5,
+                                       normalize=False,
+                                       tensorize=False)
+    train_dataset = create_dataset("potsdam", path=potsdam_path, subset="train", transform=train_transform, channels=4)
+    extra_trf = geom_transforms(in_channels=4, normalize=True, tensorize=True)
+    rotation_set = ContrastiveDataset(train_dataset, transform=ContrastiveTransform(extra_trf, extra_trf))
+    loader = DataLoader(rotation_set, batch_size=4, num_workers=1)
+    img1, img2, mask1, mask2 = next(iter(loader))
+    LOG.info("%s - %s", str(img1.shape), str(mask1.shape))
+    assert img1.shape == (4, 4, 512, 512)
+    assert mask1.shape == (4, 512, 512)
+    assert img1.shape == img2.shape
+    assert mask1.shape == mask2.shape
+    # zero is not included unless we're in incremental learning
+    assert mask1.min() >= 0 and mask1.max() <= 5
+    # we expect different transforms
+    LOG.info(torch.nn.MSELoss(reduce="mean")(img1, img2))
+    assert torch.any(img1 != img2)

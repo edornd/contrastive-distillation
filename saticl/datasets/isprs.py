@@ -34,9 +34,10 @@ class ISPRSDataset(DatasetBase):
                  transform: Callable = None) -> None:
         super().__init__()
         self._postfix = postfix
-        self._channels = channels
+        # no more than 4 channels, the 5th is added by stacking the DSM
+        self._channels = min(channels, 4)
         self._ignore_index = ignore_index
-        self._include_dsm = include_dsm
+        self._include_dsm = include_dsm or channels == 5
         self._name = city
         self._subset = subset
         self.transform = transform
@@ -53,7 +54,7 @@ class ISPRSDataset(DatasetBase):
             mask_tile = "_".join(os.path.basename(mask).split("_")[:-1])
             assert image_tile == mask_tile, f"image: {image_tile} != mask: {mask_tile}"
         # add the optional digital surface map
-        if include_dsm:
+        if self._include_dsm:
             self.dsm_files = sorted(glob.glob(os.path.join(path, self.dsm_naming())))
             assert len(self.image_files) == len(self.dsm_files), "Length mismatch between tiles and DSMs"
             for image, dsm in zip(self.image_files, self.dsm_files):
@@ -116,11 +117,13 @@ class ISPRSDataset(DatasetBase):
         if self._include_dsm:
             dsm = tif.imread(self.dsm_files[index]).astype(np.float32)
             image = np.dstack((image, dsm))
-        # preprocess if required
+        # preprocess if required, cast mask to Long for torch's CE
         if self.transform is not None:
             pair = self.transform(image=image, mask=mask)
             image = pair.get("image")
             mask = pair.get("mask")
+        else:
+            mask = torch.tensor(mask)
         return image, mask
 
     def __len__(self) -> int:
@@ -129,33 +132,11 @@ class ISPRSDataset(DatasetBase):
 
 class PotsdamDataset(ISPRSDataset):
 
-    def __init__(self,
-                 path: Path,
-                 subset: str,
-                 include_dsm: bool = False,
-                 transform: Callable = None,
-                 channels: int = 3) -> None:
-        super().__init__(path,
-                         city="potsdam",
-                         subset=subset,
-                         postfix="rgbir",
-                         channels=channels,
-                         include_dsm=include_dsm,
-                         transform=transform)
+    def __init__(self, path: Path, subset: str, transform: Callable = None, channels: int = 3, **kwargs) -> None:
+        super().__init__(path, city="potsdam", subset=subset, postfix="rgbir", channels=channels, transform=transform)
 
 
 class VaihingenDataset(ISPRSDataset):
 
-    def __init__(self,
-                 path: Path,
-                 subset: str,
-                 include_dsm: bool = False,
-                 transform: Callable = None,
-                 channels: int = 3) -> None:
-        super().__init__(path,
-                         city="vaihingen",
-                         subset=subset,
-                         postfix="rgb",
-                         channels=channels,
-                         include_dsm=include_dsm,
-                         transform=transform)
+    def __init__(self, path: Path, subset: str, transform: Callable = None, channels: int = 3, **kwargs) -> None:
+        super().__init__(path, city="vaihingen", subset=subset, postfix="rgb", channels=channels, transform=transform)

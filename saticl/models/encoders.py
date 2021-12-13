@@ -11,11 +11,16 @@ from timm.models.features import FeatureInfo
 
 class MultiEncoder(Encoder):
 
-    def __init__(self, encoder_rgb: Encoder, encoder_ir: Encoder, act_layer: Type[nn.Module],
-                 norm_layer: Type[nn.Module]):
+    def __init__(self,
+                 encoder_rgb: Encoder,
+                 encoder_ir: Encoder,
+                 act_layer: Type[nn.Module],
+                 norm_layer: Type[nn.Module],
+                 return_features: bool = False):
         super().__init__()
         self.encoder_rgb = encoder_rgb
         self.encoder_ir = encoder_ir
+        self.return_features = return_features
         self.ssmas = nn.ModuleList()
         for rgb_chs, ir_chs in zip(self.encoder_rgb.feature_info.channels(), self.encoder_ir.feature_info.channels()):
             self.ssmas.append(SSMA(rgb_channels=rgb_chs, ir_channels=ir_chs, act_layer=act_layer,
